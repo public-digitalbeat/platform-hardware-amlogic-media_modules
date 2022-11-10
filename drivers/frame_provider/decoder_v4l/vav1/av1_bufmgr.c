@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #ifndef CONFIG_AMLOGIC_MEDIA_MULTI_DEC
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +32,7 @@
 #include <linux/amlogic/media/canvas/canvas.h>
 
 #undef pr_info
-#define pr_info printk
+#define pr_info pr_cont
 
 #define __COMPARE(context, p1, p2) comp(p1, p2)
 #define __SHORTSORT(lo, hi, width, comp, context) \
@@ -430,6 +430,7 @@ static RefCntBuffer *assign_cur_frame_new_fb(AV1_COMMON *const cm) {
   new_fb_idx = get_free_frame_buffer(cm);
   if (new_fb_idx == INVALID_IDX) return NULL;
 
+  cm->buffer_pool->frame_bufs[new_fb_idx].buf.v4l_buf_index = new_fb_idx;
   cm->cur_frame = &cm->buffer_pool->frame_bufs[new_fb_idx];
   cm->cur_frame->buf.buf_8bit_valid = 0;
 #ifdef AML
@@ -1961,6 +1962,12 @@ int av1_decode_frame_headers_and_setup(AV1Decoder *pbi, int trailing_bits_presen
       // already been allocated, it will not be released by
       // assign_frame_buffer_p()!
       assert(!cm->cur_frame->raw_frame_buffer.data);
+
+      frame_to_show->buf.v4l_buf_index = cm->cur_frame->buf.index;
+      frame_to_show->buf.repeat_count ++;
+      cm->cur_frame->buf.repeat_pic = &frame_to_show->buf;
+      frame_to_show->buf.timestamp = cm->cur_frame->buf.timestamp;
+
       assign_frame_buffer_p(&cm->cur_frame, frame_to_show);
       pbi->reset_decoder_state = frame_to_show->frame_type == KEY_FRAME;
       unlock_buffer_pool(pool, flags);

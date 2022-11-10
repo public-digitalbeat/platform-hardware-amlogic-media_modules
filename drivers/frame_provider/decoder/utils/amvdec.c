@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/frame_provider/decoder/utils/amvdec.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
 #define DEBUG
 #include <linux/kernel.h>
@@ -331,7 +334,7 @@ static s32 amvdec_loadmc(const u32 *p)
 #else
 	{
 #endif
-		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL | GFP_DMA32);
 	}
 
 	if (!mc_addr)
@@ -551,7 +554,7 @@ static s32 amvdec2_loadmc(const u32 *p)
 #else
 		{
 #endif
-			mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+			mc_addr = kmalloc(MC_SIZE, GFP_KERNEL | GFP_DMA32);
 		}
 
 		if (!mc_addr)
@@ -614,7 +617,7 @@ s32 amhcodec_loadmc(const u32 *p)
 #else
 	{
 #endif
-		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+		mc_addr = kmalloc(MC_SIZE, GFP_KERNEL | GFP_DMA32);
 	}
 
 	if (!mc_addr)
@@ -660,7 +663,7 @@ static s32 amhevc_loadmc(const u32 *p)
 #else
 		{
 #endif
-			mc_addr = kmalloc(MC_SIZE, GFP_KERNEL);
+			mc_addr = kmalloc(MC_SIZE, GFP_KERNEL | GFP_DMA32);
 		}
 
 		if (!mc_addr)

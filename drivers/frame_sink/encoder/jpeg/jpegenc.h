@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #ifndef __JPEG_ENC_H_
 #define __JPEG_ENC_H_
 
@@ -144,7 +163,7 @@ struct Jpegenc_BuffInfo_s {
 	u32 max_height;
 	u32 min_buffsize;
 	struct Jpegenc_Buff_s input;
-	struct Jpegenc_Buff_s assit;
+	struct Jpegenc_Buff_s assist;
 	struct Jpegenc_Buff_s bitstream;
 };
 
@@ -196,12 +215,12 @@ struct jpegenc_wq_s {
 	u32 InputBuffStart;
 	u32 InputBuffEnd;
 
-	u32 AssitStart;
-	u32 AssitEnd;
+	u32 AssistStart;
+	u32 AssistEnd;
 
 	u32 BitstreamStart;
 	u32 BitstreamEnd;
-	void __iomem *AssitstreamStartVirtAddr;
+	void __iomem *AssiststreamStartVirtAddr;
 
 	u32 max_width;
 	u32 max_height;
@@ -234,6 +253,12 @@ struct jpegenc_manager_s {
 	struct tasklet_struct tasklet;
 };
 
+struct encdrv_dma_buf_info_t {
+	int fd;
+	ulong phys_addr; /* phys address for DMA buffer */
+	size_t size;
+};
+
 struct enc_dma_cfg {
 	int fd;
 	size_t size;
@@ -244,6 +269,28 @@ struct enc_dma_cfg {
 	struct dma_buf_attachment *attach;
 	struct sg_table *sg;
 	enum dma_data_direction dir;
+};
+
+/* To track the occupied dma_buf  */
+struct encdrv_dma_buf_pool_t {
+	struct list_head list;
+	struct enc_dma_cfg dma_cfg;
+	struct file *filp;
+};
+
+struct encdrv_buffer_t {
+	u32 size;
+	u32 cached;
+	ulong phys_addr;
+	ulong base; /* kernel logical address in use kernel */
+	ulong virt_addr; /* virtual user space address */
+};
+
+/* To track the allocated memory buffer */
+struct encdrv_buffer_pool_t {
+	struct list_head list;
+	struct encdrv_buffer_t vb;
+	struct file *filp;
 };
 
 /********************************************

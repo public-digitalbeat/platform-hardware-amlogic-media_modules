@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #include <media/v4l2-event.h>
 #include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-dma-contig.h>
@@ -32,6 +32,7 @@
 #include <linux/sched/clock.h>
 #include <linux/highmem.h>
 #include <uapi/linux/sched/types.h>
+#include <linux/amlogic/media/canvas/canvas_mgr.h>
 
 #include "aml_vcodec_drv.h"
 #include "aml_vcodec_dec.h"
@@ -66,6 +67,11 @@
 #define AML_V4L2_GET_INPUT_BUFFER_NUM (V4L2_CID_USER_AMLOGIC_BASE + 1)
 #define AML_V4L2_SET_DURATION (V4L2_CID_USER_AMLOGIC_BASE + 2)
 #define AML_V4L2_GET_FILMGRAIN_INFO (V4L2_CID_USER_AMLOGIC_BASE + 3)
+#define AML_V4L2_GET_DECODER_INFO (V4L2_CID_USER_AMLOGIC_BASE + 5)
+
+#define V4L2_EVENT_PRIVATE_EXT_VSC_BASE (V4L2_EVENT_PRIVATE_START + 0x2000)
+#define V4L2_EVENT_PRIVATE_EXT_VSC_EVENT (V4L2_EVENT_PRIVATE_EXT_VSC_BASE + 1)
+#define V4L2_EVENT_PRIVATE_EXT_SEND_ERROR (V4L2_EVENT_PRIVATE_EXT_VSC_BASE + 2)
 
 #define WORK_ITEMS_MAX (32)
 #define MAX_DI_INSTANCE (2)
@@ -357,6 +363,9 @@ void aml_vdec_dispatch_event(struct aml_vcodec_ctx *ctx, u32 changes)
 	case V4L2_EVENT_SEND_EOS:
 		event.type = V4L2_EVENT_EOS;
 		break;
+	case V4L2_EVENT_SEND_ERROR:
+		event.type = V4L2_EVENT_PRIVATE_EXT_SEND_ERROR;
+		break;
 	default:
 		v4l_dbg(ctx, V4L_DEBUG_CODEC_ERROR,
 			"unsupport dispatch event %x\n", changes);
@@ -395,7 +404,8 @@ static bool vpp_needed(struct aml_vcodec_ctx *ctx, u32* mode)
 		return false;
 
 	if (!ctx->vpp_cfg.enable_nr &&
-		(ctx->picinfo.field == V4L2_FIELD_NONE)) {
+		(ctx->picinfo.field == V4L2_FIELD_NONE) &&
+		!(ctx->config.parm.dec.cfg.double_write_mode & 0x20)) {
 		return false;
 	}
 
@@ -425,6 +435,10 @@ static bool vpp_needed(struct aml_vcodec_ctx *ctx, u32* mode)
 			*mode = VPP_MODE_DI;
 	}
 
+	if (!disable_vpp_dw_mmu &&
+		(ctx->config.parm.dec.cfg.double_write_mode & 0x20)) {
+		*mode = VPP_MODE_S4_DW_MMU;;
+	}
 #if 0//enable later
 	if (ctx->colorspace != V4L2_COLORSPACE_DEFAULT &&
 		!is_over_size(width, height, size)) {
@@ -452,12 +466,13 @@ static bool ge2d_needed(struct aml_vcodec_ctx *ctx, u32* mode)
 	if (ctx->ge2d_cfg.bypass)
 		return false;
 
-	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
+	if (is_cpu_t7()) {
 		if ((ctx->output_pix_fmt != V4L2_PIX_FMT_H264) &&
 			(ctx->output_pix_fmt != V4L2_PIX_FMT_MPEG1) &&
 			(ctx->output_pix_fmt != V4L2_PIX_FMT_MPEG2) &&
 			(ctx->output_pix_fmt != V4L2_PIX_FMT_MPEG4) &&
-			(ctx->output_pix_fmt != V4L2_PIX_FMT_MJPEG)) {
+			(ctx->output_pix_fmt != V4L2_PIX_FMT_MJPEG) &&
+			(ctx->output_pix_fmt != V4L2_PIX_FMT_AVS)) {
 			return false;
 		}
 	} else if (ctx->output_pix_fmt != V4L2_PIX_FMT_MJPEG) {
@@ -886,7 +901,7 @@ static bool is_fb_mapped(struct aml_vcodec_ctx *ctx, ulong addr)
 
 	if (dstbuf->vb.vb2_buf.state == VB2_BUF_STATE_ACTIVE) {
 		/* binding vframe handle. */
-		if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
+		if (is_cpu_t7()) {
 			if (vf->canvas0_config[0].block_mode == CANVAS_BLKMODE_LINEAR) {
 				if ((ctx->output_pix_fmt != V4L2_PIX_FMT_H264) &&
 					(ctx->output_pix_fmt != V4L2_PIX_FMT_MPEG1) &&
@@ -2054,6 +2069,12 @@ static int vidioc_decoder_streamon(struct file *file, void *priv,
 	} else
 		ctx->is_out_stream_off = false;
 
+	if (V4L2_TYPE_IS_OUTPUT(q->type)) {
+		memset(&ctx->decoder_status_info, 0,
+			sizeof(ctx->decoder_status_info));
+	}
+
+
 	v4l_dbg(ctx, V4L_DEBUG_CODEC_PROT,
 		"%s, type: %d\n", __func__, q->type);
 
@@ -2393,6 +2414,8 @@ static int vidioc_vdec_subscribe_evt(struct v4l2_fh *fh,
 		return v4l2_event_subscribe(fh, sub, 2, NULL);
 	case V4L2_EVENT_SOURCE_CHANGE:
 		return v4l2_src_change_event_subscribe(fh, sub);
+	case V4L2_EVENT_PRIVATE_EXT_SEND_ERROR:
+		return v4l2_event_subscribe(fh, sub, 5, NULL);
 	default:
 		return v4l2_ctrl_subscribe_event(fh, sub);
 	}
@@ -2781,6 +2804,15 @@ static int vidioc_vdec_s_fmt(struct file *file, void *priv,
 
 	q_data->fmt = fmt;
 	vidioc_try_fmt(f, q_data->fmt);
+
+	if (V4L2_TYPE_IS_OUTPUT(f->type) && ctx->drv_handle && ctx->receive_cmd_stop) {
+		ctx->state = AML_STATE_IDLE;
+		ATRACE_COUNTER("V_ST_VSINK-state", ctx->state);
+		v4l_dbg(ctx, V4L_DEBUG_CODEC_STATE,
+			"vcodec state (AML_STATE_IDLE)\n");
+		vdec_if_deinit(ctx);
+		ctx->receive_cmd_stop = 0;
+	}
 
 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		q_data->sizeimage[0] = pix_mp->plane_fmt[0].sizeimage;
@@ -3182,7 +3214,7 @@ static int init_mmu_bmmu_box(struct aml_vcodec_ctx *ctx)
 
 	if (vdec_if_get_param(ctx, GET_PARAM_DW_MODE, &dw_mode)) {
 		v4l_dbg(ctx, V4L_DEBUG_CODEC_ERROR, "invalid dw_mode\n");
-		return -EINVAL;
+		goto free_comp_bufs;
 	}
 
 	/* init bmmu box */
@@ -3190,16 +3222,16 @@ static int init_mmu_bmmu_box(struct aml_vcodec_ctx *ctx)
 			ctx->id, V4L_CAP_BUFF_MAX,
 			ctx->comp_info.max_size * SZ_1M, mmu_flag);
 	if (!ctx->mmu_box) {
-		vfree(ctx->comp_bufs);
 		v4l_dbg(ctx, V4L_DEBUG_CODEC_ERROR, "fail to create mmu box\n");
-		return -EINVAL;
+		goto free_comp_bufs;
 	}
 
 	/* init mmu box */
 	bmmu_flag |= CODEC_MM_FLAGS_CMA_CLEAR | CODEC_MM_FLAGS_FOR_VDECODER;
 	ctx->bmmu_box  = decoder_bmmu_box_alloc_box("v4l2_dec",
 			ctx->id, V4L_CAP_BUFF_MAX,
-			4 + PAGE_SHIFT, bmmu_flag);
+			4 + PAGE_SHIFT, bmmu_flag,
+			BMMU_ALLOC_FLAGS_WAIT);
 	if (!ctx->bmmu_box) {
 		v4l_dbg(ctx, V4L_DEBUG_CODEC_ERROR, "fail to create bmmu box\n");
 		goto free_mmubox;
@@ -3219,7 +3251,8 @@ static int init_mmu_bmmu_box(struct aml_vcodec_ctx *ctx)
 		bmmu_flag |= CODEC_MM_FLAGS_CMA_CLEAR | CODEC_MM_FLAGS_FOR_VDECODER;
 		ctx->bmmu_box_dw  = decoder_bmmu_box_alloc_box("v4l2_dec_dw",
 				ctx->id, V4L_CAP_BUFF_MAX,
-				4 + PAGE_SHIFT, bmmu_flag);
+				4 + PAGE_SHIFT, bmmu_flag,
+				BMMU_ALLOC_FLAGS_WAIT);
 		if (!ctx->bmmu_box_dw) {
 			v4l_dbg(ctx, V4L_DEBUG_CODEC_ERROR, "fail to create nmmu box dw\n");
 			goto free_mmubox_dw;
@@ -3237,6 +3270,7 @@ static int init_mmu_bmmu_box(struct aml_vcodec_ctx *ctx)
 		buf->bmmu_box = ctx->bmmu_box;
 		buf->mmu_box_dw = ctx->mmu_box_dw;
 		buf->bmmu_box_dw = ctx->bmmu_box_dw;
+		buf->used = 0;
 	}
 	kref_get(&ctx->ctx_ref);
 
@@ -3259,9 +3293,13 @@ free_bmmubox:
 	ctx->bmmu_box = NULL;
 
 free_mmubox:
-	vfree(ctx->comp_bufs);
 	decoder_mmu_box_free(ctx->mmu_box);
 	ctx->mmu_box = NULL;
+
+free_comp_bufs:
+	vfree(ctx->comp_bufs);
+	ctx->comp_bufs = NULL;
+
 	return -1;
 }
 
@@ -3407,6 +3445,95 @@ void aml_bind_dv_buffer(struct aml_vcodec_ctx *ctx, char **comp_buf, char **md_b
 		*md_buf = ctx->aux_infos.bufs[index].md_buf;
 		ctx->aux_infos.dv_index = (index + 1) % V4L_CAP_BUFF_MAX;
 	}
+}
+
+static void aml_canvas_cache_free(struct canvas_cache *canche)
+{
+	int i = -1;
+
+	for (i = 0; i < ARRAY_SIZE(canche->res); i++) {
+		if (canche->res[i].cid > 0) {
+			v4l_dbg(0, V4L_DEBUG_CODEC_BUFMGR,
+				"canvas-free, name:%s, canvas id:%d\n",
+				canche->res[i].name,
+				canche->res[i].cid);
+
+			canvas_pool_map_free_canvas(canche->res[i].cid);
+
+			canche->res[i].cid = 0;
+		}
+	}
+}
+
+void aml_canvas_cache_put(struct aml_vcodec_dev *dev)
+{
+	struct canvas_cache *canche = &dev->canche;
+
+	mutex_lock(&canche->lock);
+
+	v4l_dbg(0, V4L_DEBUG_CODEC_BUFMGR,
+		"canvas-put, ref:%d\n", canche->ref);
+
+	canche->ref--;
+
+	if (canche->ref == 0) {
+		aml_canvas_cache_free(canche);
+	}
+
+	mutex_unlock(&canche->lock);
+}
+
+int aml_canvas_cache_get(struct aml_vcodec_dev *dev, char *usr)
+{
+	struct canvas_cache *canche = &dev->canche;
+	int i;
+
+	mutex_lock(&canche->lock);
+
+	canche->ref++;
+
+	for (i = 0; i < ARRAY_SIZE(canche->res); i++) {
+		if (canche->res[i].cid <= 0) {
+			snprintf(canche->res[i].name, 32, "%s-%d", usr, i);
+			canche->res[i].cid =
+				canvas_pool_map_alloc_canvas(canche->res[i].name);
+		}
+
+		v4l_dbg(0, V4L_DEBUG_CODEC_BUFMGR,
+			"canvas-alloc, name:%s, canvas id:%d\n",
+			canche->res[i].name,
+			canche->res[i].cid);
+
+		if (canche->res[i].cid <= 0) {
+			v4l_dbg(0, V4L_DEBUG_CODEC_ERROR,
+				"canvas-fail, name:%s, canvas id:%d.\n",
+				canche->res[i].name,
+				canche->res[i].cid);
+
+			mutex_unlock(&canche->lock);
+			goto err;
+		}
+	}
+
+	v4l_dbg(0, V4L_DEBUG_CODEC_BUFMGR,
+		"canvas-get, ref:%d\n", canche->ref);
+
+	mutex_unlock(&canche->lock);
+	return 0;
+err:
+	aml_canvas_cache_put(dev);
+	return -1;
+}
+
+int aml_canvas_cache_init(struct aml_vcodec_dev *dev)
+{
+	dev->canche.ref = 0;
+	mutex_init(&dev->canche.lock);
+
+	v4l_dbg(0, V4L_DEBUG_CODEC_BUFMGR,
+		"canvas-init, ref:%d\n", dev->canche.ref);
+
+	return 0;
 }
 
 void aml_v4l_ctx_release(struct kref *kref)
@@ -4132,7 +4259,7 @@ static void vb2ops_vdec_buf_cleanup(struct vb2_buffer *vb)
 				buf->mem[i] = NULL;
 			}
 		}
-		if (ctx->output_thread_ready) {
+		if (ctx->output_thread_ready && ctx->is_stream_off) {
 			if (!is_fb_mapped(ctx, fb->m.mem[0].addr)) {
 				list_del(&fb->task->node);
 				task_chain_clean(fb->task);
@@ -4251,6 +4378,7 @@ static void vb2ops_vdec_stop_streaming(struct vb2_queue *q)
 		ctx->cap_pool.out = 0;
 		ctx->cap_pool.dec = 0;
 		ctx->cap_pool.vpp = 0;
+		ctx->cap_pool.ge2d = 0;
 	}
 }
 
@@ -4308,6 +4436,11 @@ static int aml_vdec_g_v_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case AML_V4L2_GET_FILMGRAIN_INFO:
 		ctrl->val = ctx->film_grain_present;
+		break;
+	case AML_V4L2_GET_DECODER_INFO:
+		memcpy(ctrl->p_new.p, &ctx->decoder_status_info,
+			sizeof(struct aml_decoder_status_info));
+		ctx->decoder_status_info.error_type = 0;
 		break;
 	default:
 		ret = -EINVAL;
@@ -4388,6 +4521,19 @@ static const struct v4l2_ctrl_config ctrl_gt_filmgrain_info = {
 	.def	= 0,
 };
 
+static const struct v4l2_ctrl_config ctrl_gt_decoder_info = {
+	.name		= "decoder information",
+	.id		= AML_V4L2_GET_DECODER_INFO,
+	.ops		= &aml_vcodec_dec_ctrl_ops,
+	.type		= V4L2_CTRL_COMPOUND_TYPES,
+	.flags		= V4L2_CTRL_FLAG_VOLATILE,
+	.min		= 0,
+	.max		= sizeof(struct aml_decoder_status_info),
+	.step		= 1,
+	.elem_size	= 1,
+	.dims		= { sizeof(struct aml_decoder_status_info) },
+};
+
 int aml_vcodec_dec_ctrls_setup(struct aml_vcodec_ctx *ctx)
 {
 	int ret;
@@ -4433,6 +4579,12 @@ int aml_vcodec_dec_ctrls_setup(struct aml_vcodec_ctx *ctx)
 	}
 
 	ctrl = v4l2_ctrl_new_custom(&ctx->ctrl_hdl, &ctrl_gt_filmgrain_info, NULL);
+	if ((ctrl == NULL) || (ctx->ctrl_hdl.error)) {
+		ret = ctx->ctrl_hdl.error;
+		goto err;
+	}
+
+	ctrl = v4l2_ctrl_new_custom(&ctx->ctrl_hdl, &ctrl_gt_decoder_info, NULL);
 	if ((ctrl == NULL) || (ctx->ctrl_hdl.error)) {
 		ret = ctx->ctrl_hdl.error;
 		goto err;
@@ -4524,10 +4676,6 @@ static int check_dec_cfginfo(struct aml_vdec_cfg_infos *cfg)
 		return -1;
 	}
 
-	if (mandatory_dw_mmu) {
-		cfg->double_write_mode = 0x21;
-	}
-
 	pr_info("double write mode %d margin %d\n",
 		cfg->double_write_mode, cfg->ref_buf_margin);
 	return 0;
@@ -4563,6 +4711,10 @@ static int vidioc_vdec_s_parm(struct file *file, void *fh,
 			if (check_dec_cfginfo(&in->cfg))
 				return -EINVAL;
 			dec->cfg = in->cfg;
+			if (!vdec_if_set_param(ctx, SET_PARAM_CFG_INFO, &dec->cfg) &&
+				!vdec_if_get_param(ctx, GET_PARAM_PIC_INFO, &ctx->picinfo)) {
+				update_ctx_dimension(ctx, dst_vq->type);
+			}
 		}
 		if (in->parms_status & V4L2_CONFIG_PARM_DECODE_PSINFO)
 			dec->ps = in->ps;
@@ -4583,6 +4735,8 @@ static int vidioc_vdec_s_parm(struct file *file, void *fh,
 			(dec->cfg.metadata_config_flag & (1 << 14));
 		if (force_enable_di_local_buffer)
 			ctx->vpp_cfg.enable_local_buf = true;
+		ctx->vpp_cfg.dynamic_bypass_vpp =
+			dec->cfg.metadata_config_flag & (1 << 10);
 
 		ctx->ge2d_cfg.bypass =
 			(dec->cfg.metadata_config_flag & (1 << 9));

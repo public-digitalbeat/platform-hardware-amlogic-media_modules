@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/vh264mvc.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -44,6 +46,7 @@
 #include "../utils/firmware.h"
 #include "../utils/config_parser.h"
 #include "../../../common/chips/decoder_cpu_ver_info.h"
+#include "../utils/decoder_dma_alloc.h"
 
 #define TIME_TASK_PRINT_ENABLE  0x100
 #define PUT_PRINT_ENABLE    0x200
@@ -128,6 +131,7 @@ static struct work_struct error_wd_work;
 static struct dec_sysinfo vh264mvc_amstream_dec_info;
 static dma_addr_t mc_dma_handle;
 static void *mc_cpu_addr;
+ulong mc_cpu_handle;
 
 static DEFINE_SPINLOCK(lock);
 
@@ -1559,7 +1563,8 @@ static int vh264mvc_local_init(void)
 		TOTAL_BMMU_BUFF_NUM,
 		4 + PAGE_SHIFT,
 		CODEC_MM_FLAGS_CMA_CLEAR |
-		CODEC_MM_FLAGS_FOR_VDECODER);
+		CODEC_MM_FLAGS_FOR_VDECODER,
+		BMMU_ALLOC_FLAGS_WAITCLEAR);
 
 	size = DECODER_WORK_SPACE_SIZE;
 	ret = decoder_bmmu_box_alloc_buf_phy(mm_blk_handle, 0,
@@ -1606,8 +1611,8 @@ static s32 vh264mvc_init(void)
 		}
 	} else {
 		/* -- ucode loading (amrisc and swap code) */
-		mc_cpu_addr = dma_alloc_coherent(amports_get_dma_device(),
-			MC_TOTAL_SIZE, &mc_dma_handle, GFP_KERNEL);
+		mc_cpu_addr = decoder_dma_alloc_coherent(&mc_cpu_handle,
+			MC_TOTAL_SIZE, &mc_dma_handle, "H264_MVC_MC_CPU_BUF");
 		if (!mc_cpu_addr) {
 			amvdec_disable();
 			vfree(buf);
@@ -1635,7 +1640,7 @@ static s32 vh264mvc_init(void)
 		if (ret < 0) {
 			amvdec_disable();
 
-			dma_free_coherent(amports_get_dma_device(),
+			decoder_dma_free_coherent(mc_cpu_handle,
 					MC_TOTAL_SIZE,
 					mc_cpu_addr, mc_dma_handle);
 			mc_cpu_addr = NULL;
@@ -1710,7 +1715,7 @@ static int vh264mvc_stop(void)
 
 	if (stat & STAT_MC_LOAD) {
 		if (mc_cpu_addr != NULL) {
-			dma_free_coherent(amports_get_dma_device(),
+			decoder_dma_free_coherent(mc_cpu_handle,
 				MC_TOTAL_SIZE, mc_cpu_addr, mc_dma_handle);
 			mc_cpu_addr = NULL;
 		}

@@ -33,6 +33,10 @@ CONFIGS_BUILD := -Wno-parentheses-equality -Wno-pointer-bool-conversion \
 				-Wno-logical-not-parentheses -Wno-sometimes-uninitialized \
 				-Wno-frame-larger-than=
 
+ifeq ($(CLANG_VERSION), r450784d)
+CONFIGS_BUILD += -Wno-bitwise-instead-of-logical
+endif
+
 KBUILD_CFLAGS_MODULE += $(GKI_EXT_MODULE_PREDEFINE)
 
 modules:
@@ -45,7 +49,7 @@ modules_install:
 	mkdir -p ${OUT_DIR}/../vendor_lib/modules
 	cd ${OUT_DIR}/$(M)/; find -name "*.ko" -exec cp {} ${OUT_DIR}/../vendor_lib/modules/ \;
 	mkdir -p ${OUT_DIR}/../vendor_lib/firmware/video
-	cp $(KERNEL_SRC)/$(M)/firmware/* ${OUT_DIR}/../vendor_lib/firmware/video/
+	cp $(KERNEL_SRC)/$(M)/firmware/* ${OUT_DIR}/../vendor_lib/firmware/video -rf
 
 clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(M) clean

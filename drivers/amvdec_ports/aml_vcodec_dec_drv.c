@@ -1,23 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
-
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #define DEBUG
 #include <linux/slab.h>
 #include <linux/interrupt.h>
@@ -29,6 +28,7 @@
 #include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-dma-contig.h>
 #include <linux/kthread.h>
+#include <linux/compat.h>
 
 #include "aml_vcodec_drv.h"
 #include "aml_vcodec_dec.h"
@@ -592,18 +592,26 @@ static int aml_vcodec_probe(struct platform_device *pdev)
 		goto err_reg_class;
 	}
 
+	ret = aml_canvas_cache_init(dev);
+	if (ret) {
+		dev_err(&pdev->dev, "v4l dec alloc canvas fail.\n");
+		goto err_alloc_canvas;
+	}
+
 	dev_info(&pdev->dev, "v4ldec registered as /dev/video%d\n", vfd_dec->num);
 
 	return 0;
 
-err_reg_class:
+err_alloc_canvas:
 	class_unregister(&dev->v4ldec_class);
+err_reg_class:
+	video_unregister_device(vfd_dec);
 err_dec_reg:
 	destroy_workqueue(dev->decode_workqueue);
 err_event_workq:
 	v4l2_m2m_release(dev->m2m_dev_dec);
 err_dec_mem_init:
-	video_unregister_device(vfd_dec);
+	video_device_release(vfd_dec);
 err_dec_alloc:
 	v4l2_device_unregister(&dev->v4l2_dev);
 err_res:
@@ -627,6 +635,8 @@ static int aml_vcodec_dec_remove(struct platform_device *pdev)
 		video_unregister_device(dev->vfd_dec);
 
 	v4l2_device_unregister(&dev->v4l2_dev);
+
+	aml_canvas_cache_put(dev);
 
 	dev_info(&pdev->dev, "v4ldec removed.\n");
 
@@ -675,9 +685,9 @@ u32 debug_mode;
 EXPORT_SYMBOL(debug_mode);
 module_param(debug_mode, uint, 0644);
 
-u32 mandatory_dw_mmu;
-EXPORT_SYMBOL(mandatory_dw_mmu);
-module_param(mandatory_dw_mmu, uint, 0644);
+u32 disable_vpp_dw_mmu;
+EXPORT_SYMBOL(disable_vpp_dw_mmu);
+module_param(disable_vpp_dw_mmu, uint, 0644);
 
 bool aml_set_vfm_enable;
 EXPORT_SYMBOL(aml_set_vfm_enable);

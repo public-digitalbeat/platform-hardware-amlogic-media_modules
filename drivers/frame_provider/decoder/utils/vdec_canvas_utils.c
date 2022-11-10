@@ -1,7 +1,5 @@
-/*
- * drivers/amlogic/media/frame_provider/decoder/utils/vdec_canvas_utils.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ /*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
 #include <linux/types.h>
 #include "vdec_canvas_utils.h"
@@ -361,7 +364,9 @@ void config_cav_lut_ex(u32 index, ulong addr, u32 width,
 		datah_temp = width_h | height_h | wrap_h | blkmod_h | switch_bits_ctl;
 
 		if (core == VDEC_1) {
-			if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_T3) && (endian == 7))
+			if ((endian == 7) &&
+				((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_T3) ||
+				is_cpu_t7c()))
 				WRITE_VREG(MDEC_CAV_CFG0, 0x1ff << 17);
 			else
 				WRITE_VREG(MDEC_CAV_CFG0, 0); //[0]canv_mode, by default is non-canv-mode

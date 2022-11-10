@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/vmpeg4.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -128,6 +130,7 @@
 #define DEC_RESULT_EOS		5
 #define DEC_RESULT_UNFINISH	6
 #define DEC_RESULT_ERROR_SZIE	7
+#define DEC_RESULT_ERROR_DATA      	12
 
 #define DEC_DECODE_TIMEOUT         0x21
 #define DECODE_ID(hw) (hw_to_vdec(hw)->id)
@@ -161,7 +164,7 @@ static unsigned int decode_timeout_val = 200;
 static u32 without_display_mode;
 
 #undef pr_info
-#define pr_info printk
+#define pr_info pr_cont
 unsigned int mpeg4_debug_mask = 0xff;
 static u32 run_ready_min_buf_num = 2;
 
@@ -343,6 +346,7 @@ struct vdec_mpeg4_hw_s {
 	char pts_name[32];
 	char new_q_name[32];
 	char disp_q_name[32];
+	bool process_busy;
 };
 static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw);
 static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw);
@@ -628,7 +632,7 @@ static void set_frame_info(struct vdec_mpeg4_hw_s *hw, struct vframe_s *vf,
 	vf->canvas1_config[2] = hw->canvas_config[buffer_index][2];
 #endif
 
-	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
+	if (is_cpu_t7()) {
 		endian_tmp = (hw->blkmode == CANVAS_BLKMODE_LINEAR) ? 7 : 0;
 	} else {
 		endian_tmp = (hw->blkmode == CANVAS_BLKMODE_LINEAR) ? 0 : 7;
@@ -748,6 +752,8 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
 		if (((hw->first_i_frame_ready == 0) || pb_skip)
 			 && (pic->pic_type != I_PICTURE)) {
 			hw->drop_frame_count++;
+			v4l2_ctx->decoder_status_info.decoder_error_count++;
+			vdec_v4l_post_error_event(v4l2_ctx, DECODER_WARNING_DATA_ERROR);
 			if (pic->pic_type == I_PICTURE) {
 				hw->i_lost_frames++;
 			} else if (pic->pic_type == P_PICTURE) {
@@ -925,6 +931,8 @@ static int prepare_display_buf(struct vdec_mpeg4_hw_s * hw,
 		if (((hw->first_i_frame_ready == 0) || pb_skip)
 			&& (pic->pic_type != I_PICTURE)) {
 			hw->drop_frame_count++;
+			v4l2_ctx->decoder_status_info.decoder_error_count++;
+			vdec_v4l_post_error_event(v4l2_ctx, DECODER_WARNING_DATA_ERROR);
 			if (pic->pic_type == I_PICTURE) {
 				hw->i_lost_frames++;
 			} else if (pic->pic_type == P_PICTURE) {
@@ -1087,7 +1095,7 @@ static int v4l_res_change(struct vdec_mpeg4_hw_s *hw, int width, int height, int
 	return ret;
 }
 
-static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+static irqreturn_t vmpeg4_isr_thread_handler(struct vdec_s *vdec, int irq)
 {
 	u32 reg;
 	u32 picture_type;
@@ -1108,6 +1116,15 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
 		int interlace = (READ_VREG(MP4_PIC_RATIO) & 0x80000000) >> 31;
 		mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_BUFFER_DETAIL,
 			"interlace = %d\n", interlace);
+
+		if ((frame_width <= 0) || (frame_height <= 0)) {
+			mmpeg4_debug_print(DECODE_ID(hw), 0,
+				"is_oversize w:%d h:%d\n", frame_width, frame_height);
+			hw->dec_result = DEC_RESULT_ERROR_DATA;
+			vdec_schedule_work(&hw->work);
+			return IRQ_HANDLED;
+		}
+
 		if (!v4l_res_change(hw, frame_width, frame_height, interlace)) {
 			struct aml_vcodec_ctx *ctx =
 				(struct aml_vcodec_ctx *)(hw->v4l2_ctx);
@@ -1117,6 +1134,8 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
 				vmpeg4_get_ps_info(hw, frame_width, frame_height, interlace, &ps);
 				hw->v4l_params_parsed = true;
 				vdec_v4l_set_ps_infos(ctx, &ps);
+				ctx->decoder_status_info.frame_height = ps.visible_height;
+				ctx->decoder_status_info.frame_width = ps.visible_width;
 				reset_process_time(hw);
 				hw->dec_result = DEC_RESULT_AGAIN;
 				vdec_schedule_work(&hw->work);
@@ -1144,6 +1163,7 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
 	}
 
 	if (!hw->v4l_params_parsed) {
+		reset_process_time(hw);
 		mmpeg4_debug_print(DECODE_ID(hw), PRINT_FLAG_V4L_DETAIL,
 			"The head was not found, can not to decode\n");
 		hw->dec_result = DEC_RESULT_DONE;
@@ -1543,6 +1563,18 @@ static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t vmpeg4_isr_thread_fn(struct vdec_s *vdec, int irq)
+{
+	irqreturn_t ret;
+	struct vdec_mpeg4_hw_s *hw = (struct vdec_mpeg4_hw_s *)(vdec->private);
+
+	ret = vmpeg4_isr_thread_handler(vdec, irq);
+
+	hw->process_busy = false;
+
+	return ret;
+}
+
 static irqreturn_t vmpeg4_isr(struct vdec_s *vdec, int irq)
 {
 	struct vdec_mpeg4_hw_s *hw =
@@ -1550,6 +1582,12 @@ static irqreturn_t vmpeg4_isr(struct vdec_s *vdec, int irq)
 
 	if (hw->eos)
 		return IRQ_HANDLED;
+
+	if (hw->process_busy) {
+		pr_info("%s process busy\n", __func__);
+		return IRQ_HANDLED;
+	}
+	hw->process_busy = true;
 
 	return IRQ_WAKE_THREAD;
 }
@@ -1635,7 +1673,7 @@ static void vmpeg4_work(struct work_struct *work)
 	} else if (hw->dec_result == DEC_RESULT_DONE) {
 		if (!hw->ctx_valid)
 			hw->ctx_valid = 1;
-
+		ctx->decoder_status_info.decoder_count++;
 		vdec_vframe_dirty(vdec, hw->chunk);
 		hw->chunk = NULL;
 	} else if (hw->dec_result == DEC_RESULT_AGAIN
@@ -1684,6 +1722,9 @@ static void vmpeg4_work(struct work_struct *work)
 			vdec_vframe_dirty(vdec, hw->chunk);
 			hw->chunk = NULL;
 		}
+	} else if (hw->dec_result == DEC_RESULT_ERROR_DATA) {
+		vdec_vframe_dirty(vdec, hw->chunk);
+		hw->chunk = NULL;
 	}
 
 	if (hw->stat & STAT_VDEC_RUN) {
@@ -2014,23 +2055,39 @@ static void start_process_time(struct vdec_mpeg4_hw_s *hw)
 
 static void timeout_process(struct vdec_mpeg4_hw_s *hw)
 {
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
+
+	if (hw->process_busy) {
+		pr_info("%s, process_busy\n", __func__);
+		return;
+	}
+
+	if (work_pending(&hw->work) ||
+		work_busy(&hw->work)) {
+		pr_err("mpeg4 work on busy\n");
+		return;
+	}
+
 	if (hw->stat & STAT_VDEC_RUN) {
 		amvdec_stop();
 		hw->stat &= ~STAT_VDEC_RUN;
 	}
 	mmpeg4_debug_print(DECODE_ID(hw), 0,
 		"%s decoder timeout %d\n", __func__, hw->timeout_cnt);
-	if (vdec_frame_based((hw_to_vdec(hw)))) {
-		mmpeg4_debug_print(DECODE_ID(hw), 0,
-			"%s frame_num %d, chunk size 0x%x, chksum 0x%x\n",
-			__func__,
-			hw->frame_num,
-			hw->chunk->size,
-			get_data_check_sum(hw, hw->chunk->size));
+	if (debug_enable && vdec_frame_based((hw_to_vdec(hw)))) {
+		if (hw->chunk) {
+			mmpeg4_debug_print(DECODE_ID(hw), 0,
+				"%s frame_num %d, chunk size 0x%x, chksum 0x%x\n",
+				__func__,
+				hw->frame_num,
+				hw->chunk->size,
+				get_data_check_sum(hw, hw->chunk->size));
+		}
 	}
 	hw->timeout_cnt++;
 	/* timeout: data droped, frame_num inaccurate*/
 	hw->frame_num++;
+	vdec_v4l_post_error_event(ctx, DECODER_WARNING_DECODER_TIMEOUT);
 	reset_process_time(hw);
 	hw->first_i_frame_ready = 0;
 	hw->dec_result = DEC_RESULT_DONE;
@@ -2154,7 +2211,7 @@ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
 #endif
 
 	/* cbcr_merge_swap_en */
-	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
+	if (is_cpu_t7()) {
 		if ((v4l2_ctx->q_data[AML_Q_DATA_DST].fmt->fourcc == V4L2_PIX_FMT_NV21) ||
 			(v4l2_ctx->q_data[AML_Q_DATA_DST].fmt->fourcc == V4L2_PIX_FMT_NV21M))
 			CLEAR_VREG_MASK(MDEC_PIC_DC_CTRL, 1 << 16);
@@ -2202,6 +2259,7 @@ static int vmpeg4_hw_ctx_restore(struct vdec_mpeg4_hw_s *hw)
 static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
 {
 	int i;
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
 
 	hw->vmpeg4_ratio = hw->vmpeg4_amstream_dec_info.ratio;
 
@@ -2252,6 +2310,7 @@ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
 	hw->init_flag = 0;
 	hw->dec_result = DEC_RESULT_NONE;
 	hw->timeout_cnt = 0;
+	hw->process_busy = false;
 
 	for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++)
 		hw->vfbuf_use[i] = 0;
@@ -2275,7 +2334,11 @@ static void vmpeg4_local_init(struct vdec_mpeg4_hw_s *hw)
 			MAX_BMMU_BUFFER_NUM,
 			4 + PAGE_SHIFT,
 			CODEC_MM_FLAGS_CMA_CLEAR |
-			CODEC_MM_FLAGS_FOR_VDECODER);
+			CODEC_MM_FLAGS_FOR_VDECODER,
+			BMMU_ALLOC_FLAGS_WAIT);
+	if (hw->mm_blk_handle) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_NO_MEM);
+	}
 
 	INIT_WORK(&hw->work, vmpeg4_work);
 
@@ -2287,6 +2350,7 @@ static s32 vmmpeg4_init(struct vdec_mpeg4_hw_s *hw)
 	int trickmode_fffb = 0;
 	int size = -1, fw_size = 0x1000 * 16;
 	struct firmware_s *fw = NULL;
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
 
 	fw = vmalloc(sizeof(struct firmware_s) + fw_size);
 	if (IS_ERR_OR_NULL(fw))
@@ -2305,6 +2369,7 @@ static s32 vmmpeg4_init(struct vdec_mpeg4_hw_s *hw)
 				hw->vmpeg4_amstream_dec_info.format);
 	pr_info("mmpeg4 get fw %s, size %x\n", fw->name, size);
 	if (size < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_FW_LOAD_ERROR);
 		pr_err("get firmware failed.");
 		vfree(fw);
 		return -1;
@@ -2425,6 +2490,8 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 {
 	struct vdec_mpeg4_hw_s *hw = (struct vdec_mpeg4_hw_s *)vdec->private;
 	int size = 0, ret = 0;
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
+
 	if (!hw->vdec_pg_enable_flag) {
 		hw->vdec_pg_enable_flag = 1;
 		amvdec_enable();
@@ -2529,6 +2596,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 		if (ret < 0) {
 			pr_err("[%d] %s: the %s fw loading failed, err: %x\n", vdec->id,
 				hw->fw->name, tee_enabled() ? "TEE" : "local", ret);
+			vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_FW_LOAD_ERROR);
 			hw->dec_result = DEC_RESULT_FORCE_EXIT;
 			vdec_schedule_work(&hw->work);
 			return;
@@ -2667,12 +2735,11 @@ static int ammvdec_mpeg4_probe(struct platform_device *pdev)
 		return -EFAULT;
 	}
 
-	hw = vmalloc(sizeof(struct vdec_mpeg4_hw_s));
+	hw = vzalloc(sizeof(struct vdec_mpeg4_hw_s));
 	if (hw == NULL) {
 		pr_err("\namvdec_mpeg4 decoder driver alloc failed\n");
 		return -ENOMEM;
 	}
-	memset(hw, 0, sizeof(struct vdec_mpeg4_hw_s));
 
 	/* the ctx from v4l2 driver. */
 	hw->v4l2_ctx = pdata->private;

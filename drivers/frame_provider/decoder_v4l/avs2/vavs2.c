@@ -1,7 +1,5 @@
- /*
- * drivers/amlogic/amports/avs2.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+/*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
-*/
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -59,6 +62,7 @@
 #include "../../../common/chips/decoder_cpu_ver_info.h"
 #include "avs2_global.h"
 #include "vavs2.h"
+#include "../../decoder/utils/decoder_dma_alloc.h"
 
 #define MEM_NAME "codec_avs2"
 #define I_ONLY_SUPPORT
@@ -124,7 +128,7 @@
 #define VF_POOL_SIZE        32
 
 #undef pr_info
-#define pr_info printk
+#define pr_info pr_cont
 
 #define DECODE_MODE_SINGLE				(0 | (0x80 << 24))
 #define DECODE_MODE_MULTI_STREAMBASE	(1 | (0x80 << 24))
@@ -771,6 +775,11 @@ struct AVS2Decoder_s {
 	int last_height;
 	ulong fb_token;
 	bool high_bandwidth_flag;
+	ulong rpm_mem_handle;
+	ulong lmem_phy_handle;
+	ulong frame_mmu_map_handle;
+	ulong rdma_mem_handle;
+	ulong cuva_handle;
 };
 
 static int  compute_losless_comp_body_size(
@@ -856,12 +865,15 @@ static void timeout_process(struct AVS2Decoder_s *dec)
 {
 	struct avs2_decoder *avs2_dec = &dec->avs2_dec;
 	struct avs2_frame_s *cur_pic = avs2_dec->hc.cur_pic;
+	struct aml_vcodec_ctx *ctx = dec->v4l2_ctx;
+
 	dec->timeout_num++;
 	amhevc_stop();
 	avs2_print(dec,
 		0, "%s decoder timeout\n", __func__);
 	if (cur_pic)
 		cur_pic->error_mark = 1;
+	vdec_v4l_post_error_event(ctx, DECODER_WARNING_DECODER_TIMEOUT);
 	dec->dec_result = DEC_RESULT_DONE;
 	update_decoded_pic(dec);
 	reset_process_time(dec);
@@ -3695,14 +3707,14 @@ static void avs2_local_uninit(struct AVS2Decoder_s *dec)
 	dec->rpm_ptr = NULL;
 	dec->lmem_ptr = NULL;
 	if (dec->rpm_addr) {
-		dma_free_coherent(amports_get_dma_device(),
+		decoder_dma_free_coherent(dec->rpm_mem_handle,
 						RPM_BUF_SIZE, dec->rpm_addr,
 						dec->rpm_phy_addr);
 		dec->rpm_addr = NULL;
 	}
 
 	if (dec->cuva_addr) {
-		dma_free_coherent(amports_get_dma_device(),
+		decoder_dma_free_coherent(dec->cuva_handle,
 				dec->cuva_size, dec->cuva_addr,
 					dec->cuva_phy_addr);
 		dec->cuva_addr = NULL;
@@ -3710,7 +3722,7 @@ static void avs2_local_uninit(struct AVS2Decoder_s *dec)
 
 	if (dec->lmem_addr) {
 			if (dec->lmem_phy_addr)
-				dma_free_coherent(amports_get_dma_device(),
+				decoder_dma_free_coherent(dec->lmem_phy_handle,
 						LMEM_BUF_SIZE, dec->lmem_addr,
 						dec->lmem_phy_addr);
 		dec->lmem_addr = NULL;
@@ -3719,7 +3731,7 @@ static void avs2_local_uninit(struct AVS2Decoder_s *dec)
 #ifdef AVS2_10B_MMU
 	if (dec->frame_mmu_map_addr) {
 		if (dec->frame_mmu_map_phy_addr)
-			dma_free_coherent(amports_get_dma_device(),
+			decoder_dma_free_coherent(dec->frame_mmu_map_handle,
 				get_frame_mmu_map_size(dec), dec->frame_mmu_map_addr,
 					dec->frame_mmu_map_phy_addr);
 		dec->frame_mmu_map_addr = NULL;
@@ -3811,9 +3823,9 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
 			& 0x40) >> 6;
 
 	if ((debug & AVS2_DBG_SEND_PARAM_WITH_REG) == 0) {
-		dec->rpm_addr = dma_alloc_coherent(amports_get_dma_device(),
+		dec->rpm_addr = decoder_dma_alloc_coherent(&dec->rpm_mem_handle,
 			RPM_BUF_SIZE,
-			&dec->rpm_phy_addr, GFP_KERNEL);
+			&dec->rpm_phy_addr, "AVS2_RPM_BUF");
 		if (dec->rpm_addr == NULL) {
 			pr_err("%s: failed to alloc rpm buffer\n", __func__);
 			return -1;
@@ -3826,8 +3838,8 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
 	if (cuva_buf_size > 0) {
 		dec->cuva_size = AUX_BUF_ALIGN(cuva_buf_size);
 
-		dec->cuva_addr = dma_alloc_coherent(amports_get_dma_device(),
-				dec->cuva_size, &dec->cuva_phy_addr, GFP_KERNEL);
+		dec->cuva_addr = decoder_dma_alloc_coherent(&dec->cuva_handle,
+				dec->cuva_size, &dec->cuva_phy_addr, "AVS2_CUVA_BUF");
 	        avs2_print(dec, AVS2_DBG_BUFMGR,
 			"%s, cuva_size = %d cuva_phy_addr %x dec->cuva_addr = %px\n",
 			__func__, dec->cuva_size, (u32)dec->cuva_phy_addr, dec->cuva_addr);
@@ -3837,9 +3849,9 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
 		}
 	}
 
-	dec->lmem_addr = dma_alloc_coherent(amports_get_dma_device(),
+	dec->lmem_addr = decoder_dma_alloc_coherent(&dec->lmem_phy_handle,
 			LMEM_BUF_SIZE,
-			&dec->lmem_phy_addr, GFP_KERNEL);
+			&dec->lmem_phy_addr, "AVS2_LMEM_BUF");
 	if (dec->lmem_addr == NULL) {
 		pr_err("%s: failed to alloc lmem buffer\n", __func__);
 		return -1;
@@ -3851,9 +3863,9 @@ static int avs2_local_init(struct AVS2Decoder_s *dec)
 	dec->lmem_ptr = dec->lmem_addr;
 
 #ifdef AVS2_10B_MMU
-	dec->frame_mmu_map_addr = dma_alloc_coherent(amports_get_dma_device(),
+	dec->frame_mmu_map_addr = decoder_dma_alloc_coherent(&dec->frame_mmu_map_handle,
 				get_frame_mmu_map_size(dec),
-				&dec->frame_mmu_map_phy_addr, GFP_KERNEL);
+				&dec->frame_mmu_map_phy_addr, "AVS2_MMU_BUF");
 	if (dec->frame_mmu_map_addr == NULL) {
 		pr_err("%s: failed to alloc count_buffer\n", __func__);
 		return -1;
@@ -4096,6 +4108,7 @@ static struct vframe_s *vavs2_vf_get(void *op_arg)
 			return NULL;
 		}
 		vf->index_disp = atomic_read(&dec->vf_get_count);
+		vf->omx_index = atomic_read(&dec->vf_get_count);
 		atomic_add(1, &dec->vf_get_count);
 		if (pic)
 			avs2_print(dec, AVS2_DBG_BUFMGR,
@@ -4469,46 +4482,6 @@ static void set_vframe(struct AVS2Decoder_s *dec,
 		break;
 	}
 	if ((vf->type & VIDTYPE_COMPRESS) == 0)
-		vf->bitdepth = BITDEPTH_Y8 | BITDEPTH_U8 | BITDEPTH_V8;
-	if (pic->bit_depth == AVS2_BITS_8)
-		vf->bitdepth |= BITDEPTH_SAVING_MODE;
-
-	set_frame_info(dec, vf);
-
-	vf->width = pic->pic_w /
-		get_double_write_ratio(pic->double_write_mode);
-	vf->height = pic->pic_h /
-		get_double_write_ratio(pic->double_write_mode);
-	if (force_w_h != 0) {
-		vf->width = (force_w_h >> 16) & 0xffff;
-		vf->height = force_w_h & 0xffff;
-	}
-	vf->compWidth = pic->pic_w;
-	vf->compHeight = pic->pic_h;
-	if (force_fps & 0x100) {
-		u32 rate = force_fps & 0xff;
-		if (rate)
-			vf->duration = 96000/rate;
-		else
-			vf->duration = 0;
-	}
-
-	switch (pic->bit_depth) {
-	case AVS2_BITS_8:
-		vf->bitdepth = BITDEPTH_Y8 |
-			BITDEPTH_U8 | BITDEPTH_V8;
-		break;
-	case AVS2_BITS_10:
-	case AVS2_BITS_12:
-		vf->bitdepth = BITDEPTH_Y10 |
-			BITDEPTH_U10 | BITDEPTH_V10;
-		break;
-	default:
-		vf->bitdepth = BITDEPTH_Y10 |
-			BITDEPTH_U10 | BITDEPTH_V10;
-		break;
-	}
-	if ((vf->type & VIDTYPE_COMPRESS) == 0)
 		vf->bitdepth =
 			BITDEPTH_Y8 | BITDEPTH_U8 | BITDEPTH_V8;
 	if (pic->bit_depth == AVS2_BITS_8)
@@ -4591,6 +4564,8 @@ static int avs2_prepare_display_buf(struct AVS2Decoder_s *dec)
 			avs2_print(dec, AVS2_DBG_BUFMGR_DETAIL,
 				"!!!error pic, skip\n",
 				0);
+			v4l2_ctx->decoder_status_info.decoder_error_count++;
+			vdec_v4l_post_error_event(v4l2_ctx, DECODER_WARNING_DATA_ERROR);
 			continue;
 		}
 
@@ -4665,6 +4640,7 @@ static int notify_v4l_eos(struct vdec_s *vdec)
 	struct vframe_s *vf = &dec->vframe_dummy;
 	struct vdec_v4l2_buffer *fb = NULL;
 	int index = INVALID_IDX;
+	int out_buff_index = INVALID_IDX;
 	ulong expires;
 
 	if (dec->eos) {
@@ -4682,8 +4658,14 @@ static int notify_v4l_eos(struct vdec_s *vdec)
 			return 0;
 		}
 
+		out_buff_index = dec->avs2_dec.fref[index]->index;
+		if (INVALID_IDX == out_buff_index) {
+			pr_err("[%d] AVS2 EOS get free buff fail. out_buff_index = INVALID_IDX\n", ctx->id);
+			return 0;
+		}
+
 		fb = (struct vdec_v4l2_buffer *)
-			dec->m_BUF[index].v4l_ref_buf_addr;
+			dec->m_BUF[out_buff_index].v4l_ref_buf_addr;
 
 		vf->type		|= VIDTYPE_V4L_EOS;
 		vf->timestamp		= ULONG_MAX;
@@ -5405,6 +5387,7 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
 	unsigned int dec_status = dec->dec_status;
 	int i, ret;
 	int32_t start_code = 0;
+	struct aml_vcodec_ctx *ctx = dec->v4l2_ctx;
 
 	avs2_print(dec, AVS2_DBG_BUFMGR_MORE,
 		"%s decode_status 0x%x process_state %d lcu 0x%x\n",
@@ -5454,6 +5437,7 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
 		debug |= (AVS2_DBG_DIS_LOC_ERROR_PROC |
 			AVS2_DBG_DIS_SYS_ERROR_PROC);
 		dec->fatal_error |= DECODER_FATAL_ERROR_SIZE_OVERFLOW;
+		vdec_v4l_post_error_event(ctx, DECODER_WARNING_DATA_ERROR);
 		if (dec->m_ins_flag)
 			reset_process_time(dec);
 		goto irq_handled_exit;
@@ -5746,6 +5730,8 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
 				dec->init_pic_h = dec->frame_height;
 				dec->last_width = dec->frame_width;
 				dec->last_height = dec->frame_height;
+				ctx->decoder_status_info.frame_height = ps.visible_height;
+				ctx->decoder_status_info.frame_width = ps.visible_width;
 				dec->v4l_params_parsed = true;
 				dec->process_busy = 0;
 				dec_again_process(dec);
@@ -5819,10 +5805,12 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
 			if (ret >= 0) {
 				dec->cur_fb_idx_mmu =
 					dec->avs2_dec.hc.cur_pic->index;
-			} else
+			} else {
+				vdec_v4l_post_error_event(ctx, DECODER_ERROR_ALLOC_BUFFER_FAIL);
 				pr_err("can't alloc need mmu1,idx %d ret =%d\n",
 					dec->avs2_dec.hc.cur_pic->index,
 					ret);
+			}
 		}
 #endif
 
@@ -5841,9 +5829,10 @@ static irqreturn_t vavs2_isr_thread_fn(int irq, void *data)
 				MV_BUFFER_IDX(i),
 				mv_buf_size,
 				DRIVER_NAME,
-				&buf_addr) < 0)
+				&buf_addr) < 0) {
+				vdec_v4l_post_error_event(ctx, DECODER_ERROR_ALLOC_BUFFER_FAIL);
 				ret = -1;
-			else
+			} else
 				dec->avs2_dec.hc.cur_pic->mpred_mv_wr_start_addr = buf_addr;
 		}
 #endif
@@ -6394,12 +6383,15 @@ static s32 vavs2_init(struct vdec_s *vdec)
 	int fw_size = 0x1000 * 16;
 	struct firmware_s *fw = NULL;
 	struct AVS2Decoder_s *dec = (struct AVS2Decoder_s *)vdec->private;
+	struct aml_vcodec_ctx *ctx = dec->v4l2_ctx;
 
 	timer_setup(&dec->timer, vavs2_put_timer_func, 0);
 
 	dec->stat |= STAT_TIMER_INIT;
-	if (vavs2_local_init(dec) < 0)
+	if (vavs2_local_init(dec) < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_NO_MEM);
 		return -EBUSY;
+	}
 
 	vdec_set_vframe_comm(vdec, DRIVER_NAME);
 
@@ -6429,6 +6421,7 @@ static s32 vavs2_init(struct vdec_s *vdec)
 
 	ret = amhevc_loadmc_ex(VFORMAT_AVS2, NULL, fw->data);
 	if (ret < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_FW_LOAD_ERROR);
 		amhevc_disable();
 		vfree(fw);
 		pr_err("AVS2: the %s fw loading failed, err: %x\n",
@@ -6506,7 +6499,8 @@ static int amvdec_avs2_mmu_init(struct AVS2Decoder_s *dec)
 		4 + PAGE_SHIFT,
 		CODEC_MM_FLAGS_CMA_CLEAR |
 		CODEC_MM_FLAGS_FOR_VDECODER |
-		tvp_flag);
+		tvp_flag,
+		BMMU_ALLOC_FLAGS_WAIT);
 	if (!dec->bmmu_box) {
 		pr_err("avs2 alloc bmmu box failed!!\n");
 		return -1;
@@ -6662,6 +6656,7 @@ static void avs2_work(struct work_struct *work)
 		dec->frame_count++;
 		dec->process_state = PROC_STATE_INIT;
 		decode_frame_count[dec->index] = dec->frame_count;
+		ctx->decoder_status_info.decoder_count++;
 
 #ifdef AVS2_10B_MMU
 		dec->used_4k_num =
@@ -6864,6 +6859,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 	struct AVS2Decoder_s *dec =
 		(struct AVS2Decoder_s *)vdec->private;
 	int r;
+	struct aml_vcodec_ctx *ctx = dec->v4l2_ctx;
 
 	run_count[dec->index]++;
 	dec->vdec_cb_arg = arg;
@@ -6934,6 +6930,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 	} else if (amhevc_loadmc_ex(VFORMAT_AVS2, NULL, dec->fw->data) < 0) {
 		vdec->mc_loaded = 0;
 		amhevc_disable();
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_FW_LOAD_ERROR);
 		avs2_print(dec, 0, "%s: Error amvdec_loadmc fail\n", __func__);
 		dec->dec_result = DEC_RESULT_FORCE_EXIT;
 		vdec_schedule_work(&dec->work);
@@ -7019,6 +7016,7 @@ static void  avs2_decode_ctx_reset(struct AVS2Decoder_s *dec)
 static void reset(struct vdec_s *vdec)
 {
 	struct AVS2Decoder_s *dec = (struct AVS2Decoder_s *)vdec->private;
+	struct aml_vcodec_ctx *ctx = dec->v4l2_ctx;
 
 	cancel_work_sync(&dec->work);
 
@@ -7035,8 +7033,10 @@ static void reset(struct vdec_s *vdec)
 	reset_process_time(dec);
 
 	avs2_local_uninit(dec);
-	if (vavs2_local_init(dec) < 0)
+	if (vavs2_local_init(dec) < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_NO_MEM);
 		avs2_print(dec, 0, "%s local_init failed \r\n", __func__);
+	}
 
 	avs2_decode_ctx_reset(dec);
 	atomic_set(&dec->vf_pre_count, 0);
@@ -7188,6 +7188,7 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
 	struct vframe_content_light_level_s content_light_level;
 	struct vframe_master_display_colour_s vf_dp;
 	struct AVS2Decoder_s *dec = NULL;
+	struct aml_vcodec_ctx *ctx = NULL;
 
 	pr_info("%s\n", __func__);
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5D) {
@@ -7215,6 +7216,7 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
 		}
 	}
 	dec->v4l2_ctx = pdata->private;
+	ctx = dec->v4l2_ctx;
 	pdata->private = dec;
 	pdata->dec_status = vavs2_dec_status;
 #ifdef I_ONLY_SUPPORT
@@ -7231,7 +7233,8 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
 	dec->m_ins_flag = 1;
 
 	if (is_rdma_enable()) {
-		dec->rdma_adr = dma_alloc_coherent(amports_get_dma_device(), RDMA_SIZE , &dec->rdma_phy_adr, GFP_KERNEL);
+		dec->rdma_adr = decoder_dma_alloc_coherent(&dec->rdma_mem_handle,
+							RDMA_SIZE , &dec->rdma_phy_adr, "AVS2_RDMA_BUF");
 		for (i = 0; i < SCALELUT_DATA_WRITE_NUM; i++) {
 			dec->rdma_adr[i * 4] = HEVC_IQIT_SCALELUT_WR_ADDR & 0xfff;
 			dec->rdma_adr[i * 4 + 1] = i;
@@ -7353,6 +7356,7 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
 	video_signal_type = dec->video_signal_type;
 
 	if (amvdec_avs2_mmu_init(dec) < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_NO_MEM);
 		pr_err("avs2 alloc bmmu box failed!!\n");
 		/* devm_kfree(&pdev->dev, (void *)dec); */
 		vfree((void *)dec);
@@ -7363,6 +7367,7 @@ static int ammvdec_avs2_probe(struct platform_device *pdev)
 			dec->cma_alloc_count * PAGE_SIZE, DRIVER_NAME,
 			&dec->cma_alloc_addr);
 	if (ret < 0) {
+		vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_NO_MEM);
 		uninit_mmu_buffers(dec);
 		/* devm_kfree(&pdev->dev, (void *)dec); */
 		vfree((void *)dec);
@@ -7460,7 +7465,8 @@ static int ammvdec_avs2_remove(struct platform_device *pdev)
 		   dec->pts_missed, dec->pts_hit, dec->frame_dur);
 #endif
 	if (is_rdma_enable())
-		dma_free_coherent(amports_get_dma_device(), RDMA_SIZE, dec->rdma_adr, dec->rdma_phy_adr);
+		decoder_dma_free_coherent(dec->rdma_mem_handle,
+						RDMA_SIZE, dec->rdma_adr, dec->rdma_phy_adr);
 
 	vfree((void *)dec);
 	return 0;

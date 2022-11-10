@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/stream_input/amports/amstream_profile.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/device.h>
@@ -120,8 +122,10 @@ static int vcodec_feature_dolbyVison(u8 *buf, int size, int vformat)
 			if ((get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXM) &&
 				(get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_T5) &&
 				(get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_T5D) &&
-				(get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_S4))
+				(get_cpu_major_id() != AM_MESON_CPU_MAJOR_ID_S4)) {
 				pbuf += snprintf(pbuf, size, "        \"DolbyVision\" : \"true\"\n");
+				pbuf += snprintf(pbuf, size, "        \"multi_frame_dv\" : \"true\"\n");
+			}
 			break;
 		default:
 			break;

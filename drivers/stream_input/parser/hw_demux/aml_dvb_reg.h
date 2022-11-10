@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/dvb_tv/dvb_reg.h
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,15 +11,15 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #ifndef _DVB_REG_H_
 #define _DVB_REG_H_
-
-//#include <linux/amlogic/iomap.h>
 #include <linux/amlogic/media/registers/register_map.h>
-//#include <linux/amlogic/media/registers/cpu_version.h>
-
 #define ID_STB_CBUS_BASE		0
 #define ID_SMARTCARD_REG_BASE		1
 #define ID_ASYNC_FIFO_REG_BASE		2

@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/stream_input/amports/amstream.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
 #define DEBUG
 #include <linux/kernel.h>
@@ -24,6 +27,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/compat.h>
 #include <uapi/linux/major.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
@@ -51,12 +55,8 @@
 #endif
 #include "../amports/streambuf.h"
 #include "../amports/streambuf_reg.h"
-#include "../parser/tsdemux.h"
-#include "../parser/psparser.h"
-#include "../parser/esparser.h"
 #include "../../frame_provider/decoder/utils/vdec.h"
 #include "adec.h"
-#include "../parser/rmparser.h"
 #include "amports_priv.h"
 #include <linux/amlogic/media/utils/amports_config.h>
 #include <linux/amlogic/media/frame_sync/tsync_pcr.h>
@@ -78,6 +78,7 @@
 #include "../subtitle/subtitle.h"
 #include "stream_buffer_base.h"
 #include "../../frame_provider/decoder/utils/vdec_feature.h"
+#include "../parser/stream_parser.h"
 
 //#define G12A_BRINGUP_DEBUG
 
@@ -679,6 +680,7 @@ static int video_port_init(struct port_priv_s *priv,
 	}
 
 	if (vdec_dual(vdec)) {
+		vdec->slave->sys_info = vdec->sys_info;
 		r = vdec_init(vdec->slave,
 			(priv->vdec->sys_info->height *
 			priv->vdec->sys_info->width) > 1920*1088, false);
@@ -2251,6 +2253,7 @@ static long amstream_ioctl_set(struct port_priv_s *priv, ulong arg)
 		break;
 	case AMSTREAM_SET_VIDEO_ID:
 		priv->vdec->video_id = parm.data_32;
+		priv->vdec->afd_video_id = parm.data_32;
 		mutex_lock(&userdata->mutex);
 		for (i = 0;i < MAX_USERDATA_CHANNEL_NUM; i++) {
 			if (userdata->used[i] == 0) {
@@ -2263,7 +2266,7 @@ static long amstream_ioctl_set(struct port_priv_s *priv, ulong arg)
 		}
 		mutex_unlock(&userdata->mutex);
 
-		pr_info("AMSTREAM_SET_VIDEO_ID video_id: %d\n", parm.data_32);
+		pr_info("AMSTREAM_SET_VIDEO_ID vdec %p video_id: %d\n", priv->vdec, parm.data_32);
 		break;
 	default:
 		r = -ENOIOCTLCMD;

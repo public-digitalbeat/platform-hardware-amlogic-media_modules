@@ -1,7 +1,5 @@
-/*
- * drivers/amlogic/media/stream_input/parser/stream_buffer_base.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ /*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
 #define DEBUG
 #include <linux/kernel.h>
@@ -174,10 +177,11 @@ void stream_buffer_meta_write(struct stream_buf_s *stbuf,
 	stbuf->stream_offset += meta->stbuf_pktsize;
 	stbuf->last_offset[stbuf->write_count % 2] = stbuf->stream_offset;
 	stbuf->write_count++;
-	/*
-	pr_debug("%s, update wp 0x%x + sz 0x%x --> 0x%x, stream_offset 0x%x\n",
-		__func__, meta->stbuf_pktaddr, meta->stbuf_pktsize, wp, stbuf->stream_offset);
-	*/
+
+	if (vdec_get_debug_flags() & 0x10000000) {
+		pr_debug("%s[%d], update wp 0x%x + sz 0x%x --> 0x%x, stream_offset 0x%x\n",
+			__func__, stbuf->write_count, meta->stbuf_pktaddr, meta->stbuf_pktsize, wp, stbuf->stream_offset);
+	}
 }
 EXPORT_SYMBOL(stream_buffer_meta_write);
 

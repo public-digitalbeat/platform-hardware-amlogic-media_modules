@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/frame_provider/decoder/h264/vh264.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #define DEBUG
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -3677,7 +3679,8 @@ static int vh264_local_init(void)
 			4 + PAGE_SHIFT,
 			CODEC_MM_FLAGS_CMA_CLEAR |
 			CODEC_MM_FLAGS_FOR_VDECODER |
-			tvp_flag);
+			tvp_flag,
+			BMMU_ALLOC_FLAGS_WAITCLEAR);
 	}
 	pr_info
 	("H264 sysinfo: %dx%d duration=%d, pts_outside=%d \n",

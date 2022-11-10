@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2020 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #ifndef _AML_VCODEC_VPP_H_
 #define _AML_VCODEC_VPP_H_
 
@@ -36,6 +36,7 @@ enum vpp_work_mode {
 	VPP_MODE_DI_LOCAL = 0x81,
 	VPP_MODE_COLOR_CONV_LOCAL = 0x82,
 	VPP_MODE_NOISE_REDUC_LOCAL = 0x83,
+	VPP_MODE_S4_DW_MMU = 0x91,
 	VPP_MODE_MAX = 0xff
 };
 
@@ -87,6 +88,7 @@ struct aml_v4l2_vpp {
 	bool is_bypass_p;
 	int di_ibuf_num;
 	int di_obuf_num;
+	bool get_eos;
 };
 
 struct task_ops_s *get_vpp_ops(void);

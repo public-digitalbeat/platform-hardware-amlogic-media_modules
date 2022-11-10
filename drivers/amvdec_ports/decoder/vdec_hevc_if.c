@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
@@ -633,7 +633,7 @@ static int vdec_hevc_decode(unsigned long h_vdec,
 	struct aml_dec_params *parms)
  {
 	 if (inst->parms.parms_status & V4L2_CONFIG_PARM_DECODE_CFGINFO)
-		 parms->cfg = inst->parms.cfg;
+		parms->cfg = inst->parms.cfg;
 	 if (inst->parms.parms_status & V4L2_CONFIG_PARM_DECODE_PSINFO)
 		 parms->ps = inst->parms.ps;
 	 if (inst->parms.parms_status & V4L2_CONFIG_PARM_DECODE_HDRINFO)
@@ -685,9 +685,9 @@ static int vdec_hevc_get_param(unsigned long h_vdec,
 	case GET_PARAM_DW_MODE:
 	{
 		u32 *mode = out;
-		u32 m = inst->ctx->config.parm.dec.cfg.double_write_mode;
+		u32 m = inst->parms.cfg.double_write_mode;
 		if (m <= 16)
-			*mode = inst->ctx->config.parm.dec.cfg.double_write_mode;
+			*mode = inst->parms.cfg.double_write_mode;
 		else
 			*mode = vdec_get_dw_mode(inst, 0);
 		break;
@@ -760,10 +760,18 @@ static void set_param_ps_info(struct vdec_hevc_inst *inst,
 static void set_cfg_info(struct vdec_hevc_inst *inst,
 	struct aml_vdec_cfg_infos *cfg)
 {
+	struct vdec_pic_info *pic = &inst->vsi->pic;
+	int dw = inst->parms.cfg.double_write_mode;
 	memcpy(&inst->ctx->config.parm.dec.cfg,
 		cfg, sizeof(struct aml_vdec_cfg_infos));
 	memcpy(&inst->parms.cfg,
 		cfg, sizeof(struct aml_vdec_cfg_infos));
+	if (dw != inst->ctx->config.parm.dec.cfg.double_write_mode) {
+		dw = inst->ctx->config.parm.dec.cfg.double_write_mode;
+		pic->y_len_sz	= ALIGN(vdec_pic_scale(inst, pic->coded_width, dw), 64) *
+					ALIGN(vdec_pic_scale(inst, pic->coded_height, dw), 64);
+		pic->c_len_sz	= pic->y_len_sz >> 1;
+	}
 }
 
 static void set_param_comp_buf_info(struct vdec_hevc_inst *inst,

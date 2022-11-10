@@ -1,9 +1,5 @@
 /*
- * vpu.c
- *
- * linux device driver for VPU.
- *
- * Copyright (C) 2006 - 2013  CHIPS&MEDIA INC.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,8 +11,13 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ * linux device driver for VPU.
  */
-
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
@@ -39,6 +40,7 @@
 #include <linux/compat.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/of_address.h>
+#include <linux/compat.h>
 #include <linux/amlogic/media/codec_mm/codec_mm.h>
 
 #include <linux/amlogic/media/registers/cpu_version.h>
@@ -286,7 +288,7 @@ static void vpu_free_dma_buffer(struct vpudrv_buffer_t *vb)
 
 static s32 vpu_free_instances(struct file *filp)
 {
-	struct vpudrv_instanace_list_t *vil, *n;
+	struct vpudrv_instance_list_t *vil, *n;
 	struct vpudrv_instance_pool_t *vip;
 	void *vip_base;
 
@@ -365,7 +367,7 @@ static void hevcenc_isr_tasklet(ulong data)
 {
 	struct vpu_drv_context_t *dev = (struct vpu_drv_context_t *)data;
 
-	enc_pr(LOG_INFO, "hevcenc_isr_tasklet  interruput:0x%08lx\n",
+	enc_pr(LOG_INFO, "hevcenc_isr_tasklet  interrupt:0x%08lx\n",
 		dev->interrupt_reason);
 	if (dev->interrupt_reason) {
 		/* notify the interrupt to user space */
@@ -1117,7 +1119,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
 	case VDI_IOCTL_OPEN_INSTANCE:
 		{
 			struct vpudrv_inst_info_t inst_info;
-			struct vpudrv_instanace_list_t *vil, *n;
+			struct vpudrv_instance_list_t *vil, *n;
 
 			vil = kzalloc(sizeof(*vil), GFP_KERNEL);
 			if (!vil)
@@ -1172,7 +1174,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
 	case VDI_IOCTL_CLOSE_INSTANCE:
 		{
 			struct vpudrv_inst_info_t inst_info;
-			struct vpudrv_instanace_list_t *vil, *n;
+			struct vpudrv_instance_list_t *vil, *n;
 
 			enc_pr(LOG_ALL,
 				"[+]VDI_IOCTL_CLOSE_INSTANCE\n");
@@ -1224,7 +1226,7 @@ static long vpu_ioctl(struct file *filp, u32 cmd, ulong arg)
 	case VDI_IOCTL_GET_INSTANCE_NUM:
 		{
 			struct vpudrv_inst_info_t inst_info;
-			struct vpudrv_instanace_list_t *vil, *n;
+			struct vpudrv_instance_list_t *vil, *n;
 
 			enc_pr(LOG_ALL,
 				"[+]VDI_IOCTL_GET_INSTANCE_NUM\n");
@@ -2058,7 +2060,7 @@ static s32 vpu_probe(struct platform_device *pdev)
 	if (use_reserve == false) {
 #ifndef CONFIG_CMA
 		enc_pr(LOG_ERROR,
-			"HevcEnc reserved memory is invaild, probe fail!\n");
+			"HevcEnc reserved memory is invalid, probe fail!\n");
 		err = -EFAULT;
 		goto ERROR_PROVE_DEVICE;
 #else
@@ -2111,10 +2113,6 @@ static s32 vpu_probe(struct platform_device *pdev)
 			return err;
 		}
 	}
-
-#ifndef VPU_SUPPORT_CLOCK_CONTROL
-	vpu_clk_config(1);
-#endif
 
 	np = pdev->dev.of_node;
 	reg_count = 0;
@@ -2201,10 +2199,6 @@ ERROR_PROVE_DEVICE:
 		memset(&s_vmem, 0, sizeof(struct video_mm_t));
 	}
 
-#ifndef VPU_SUPPORT_CLOCK_CONTROL
-	vpu_clk_config(0);
-#endif
-
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2)
 		vpu_clk_unprepare(&pdev->dev, &s_vpu_clks);
 
@@ -2260,9 +2254,6 @@ static s32 vpu_remove(struct platform_device *pdev)
 			0, sizeof(struct vpudrv_buffer_t));
 	}
 	hevc_pdev = NULL;
-#ifndef VPU_SUPPORT_CLOCK_CONTROL
-	vpu_clk_config(0);
-#endif
 
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2)
 		vpu_clk_unprepare(&pdev->dev, &s_vpu_clks);

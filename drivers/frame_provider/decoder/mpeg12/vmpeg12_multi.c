@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/vmpeg12.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
-*/
-
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #define DEBUG
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -53,6 +55,7 @@
 #include "../utils/config_parser.h"
 #include <media/v4l2-mem2mem.h>
 #include "../utils/vdec_feature.h"
+#include "../utils/decoder_dma_alloc.h"
 
 #define MEM_NAME "codec_mmpeg12"
 #define CHECK_INTERVAL        (HZ/100)
@@ -223,7 +226,7 @@ struct pic_info_t {
 	u32 hw_decode_time;
 	u32 frame_size; // For frame base mode
 	u64 timestamp;
-	u8  user_data_buf[CCBUF_SIZE];
+	char *user_data_buf;
 	struct userdata_param_t ud_param;
 };
 
@@ -287,6 +290,7 @@ struct vdec_mpeg12_hw_s {
 	dma_addr_t ccbuf_phyAddress;
 	void *ccbuf_phyAddress_virt;
 	u32 cc_buf_size;
+	ulong cc_buf_handle;
 	unsigned long ccbuf_phyAddress_is_remaped_nocache;
 	u32 frame_rpt_state;
 /* for error handling */
@@ -360,6 +364,7 @@ struct vdec_mpeg12_hw_s {
 	u32  parse_user_data_size;
 	struct userdata_meta_info_t meta_info;
 	u32 vf_ucode_cc_last_wp;
+	bool process_busy;
 };
 
 static u32 get_ratio_control(struct vdec_mpeg12_hw_s *hw);
@@ -379,7 +384,7 @@ static int check_dirty_data(struct vdec_s *vdec);
 static int debug_enable;
 /*static struct work_struct userdata_push_work;*/
 #undef pr_info
-#define pr_info printk
+#define pr_info pr_cont
 unsigned int mpeg12_debug_mask = 0xff;
 /*static int counter_max = 5;*/
 static u32 run_ready_min_buf_num = 2;
@@ -1892,8 +1897,8 @@ static int prepare_display_buf(struct vdec_mpeg12_hw_s *hw,
 				int i = 0;
 				u8 *pstart = (u8 *)ud_param.pbuf_addr;
 				PR_INIT(128);
-				debug_print(DECODE_ID(hw), 0,"%s:userdata len %d.\n",
-					__func__,ud_param.buf_len);
+				debug_print(DECODE_ID(hw), 0,"%s:userdata len %d. vdec %p video_id %d\n",
+					__func__,ud_param.buf_len, vdec, ud_param.instance_id);
 				for (i = 0; i < ud_param.buf_len; i++) {
 					PR_FILL("%02x ", pstart[i]);
 					if (((i + 1) & 0xf) == 0)
@@ -2076,22 +2081,28 @@ static void copy_user_data_to_pic(struct vdec_mpeg12_hw_s *hw, struct pic_info_t
 {
 	struct vdec_s *vdec = hw_to_vdec(hw);
 
-	memset(pic->user_data_buf, 0, CCBUF_SIZE);
-	if (hw->parse_user_data_size < CCBUF_SIZE) {
-		memcpy(pic->user_data_buf, hw->parse_user_data_buf, hw->parse_user_data_size);
-		pic->ud_param.buf_len = hw->parse_user_data_size;
+	if (pic->user_data_buf != NULL) {
+		memset(pic->user_data_buf, 0, CCBUF_SIZE);
+		if (hw->parse_user_data_size < CCBUF_SIZE) {
+			memcpy(pic->user_data_buf, hw->parse_user_data_buf, hw->parse_user_data_size);
+			pic->ud_param.buf_len = hw->parse_user_data_size;
+		} else {
+			pic->ud_param.buf_len = 0;
+			debug_print(DECODE_ID(hw), 0,
+				"sei data len is over 5k\n", hw->parse_user_data_size);
+		}
 	} else {
 		pic->ud_param.buf_len = 0;
 	}
 	pic->ud_param.pbuf_addr = pic->user_data_buf;
 	pic->ud_param.meta_info = hw->meta_info;
-	pic->ud_param.instance_id = vdec->video_id;
+	pic->ud_param.instance_id = vdec->afd_video_id;
 
 	hw->parse_user_data_size = 0;
 	memset(hw->parse_user_data_buf, 0, CCBUF_SIZE);
 }
 
-static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+static irqreturn_t vmpeg12_isr_thread_handler(struct vdec_s *vdec, int irq)
 {
 	u32 reg, index, info, seqinfo, offset, pts, frame_size=0, tmp;
 	u64 pts_us64 = 0;
@@ -2271,6 +2282,9 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
 			if (hw->chunk) {
 				hw->last_chunk_pts = hw->chunk->pts;
 				new_pic->timestamp = hw->chunk->timestamp;
+				new_pic->pts_valid = hw->chunk->pts_valid;
+				new_pic->pts = hw->chunk->pts;
+				new_pic->pts64 = hw->chunk->pts64;
 			}
 			new_pic->pts_valid = false;
 		}
@@ -2343,13 +2357,33 @@ static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
 
 	return IRQ_HANDLED;
 }
+
+static irqreturn_t vmpeg12_isr_thread_fn(struct vdec_s *vdec, int irq)
+{
+	irqreturn_t ret;
+	struct vdec_mpeg12_hw_s *hw =
+		(struct vdec_mpeg12_hw_s *)(vdec->private);
+
+	ret = vmpeg12_isr_thread_handler(vdec, irq);
+
+	hw->process_busy = false;
+
+	return ret;
+}
+
 static irqreturn_t vmpeg12_isr(struct vdec_s *vdec, int irq)
 {
 	u32 info, offset;
 	struct vdec_mpeg12_hw_s *hw =
-	(struct vdec_mpeg12_hw_s *)(vdec->private);
+		(struct vdec_mpeg12_hw_s *)(vdec->private);
 	if (hw->eos)
 		return IRQ_HANDLED;
+	if (hw->process_busy) {
+		pr_info("%s, process busy\n", __func__);
+		return IRQ_HANDLED;
+	}
+	hw->process_busy = true;
+
 	info = READ_VREG(MREG_PIC_INFO);
 	offset = READ_VREG(MREG_FRAME_OFFSET);
 
@@ -2876,13 +2910,41 @@ static int vmpeg12_canvas_init(struct vdec_mpeg12_hw_s *hw)
 					decbuf_size, i);
 				return ret;
 			}
+
+			if (vdec->vdata == NULL) {
+				vdec->vdata = vdec_data_get();
+			}
+
+			if (vdec->vdata != NULL) {
+				struct pic_info_t *pic = NULL;
+				int index = 0;
+
+				pic = &hw->pics[i];
+				if (pic != NULL) {
+					pic->user_data_buf = NULL;
+				}
+
+				index = vdec_data_get_index((ulong)vdec->vdata);
+				if (index >= 0) {
+					pic->user_data_buf = vzalloc(CCBUF_SIZE);
+					if (pic->user_data_buf == NULL) {
+						debug_print(DECODE_ID(hw), 0, "alloc %dth userdata failed\n", i);
+					}
+					vdec_data_buffer_count_increase((ulong)vdec->vdata, index, i);
+					vdec->vdata->data[index].user_data_buf = pic->user_data_buf;
+					INIT_LIST_HEAD(&vdec->vdata->release_callback[i].node);
+					decoder_bmmu_box_add_callback_func(hw->mm_blk_handle, i, (void *)&vdec->vdata->release_callback[i]);
+				} else {
+					debug_print(DECODE_ID(hw), 0, "vdec data is full\n");
+				}
+			}
 		}
 
 		if (i == hw->buf_num) {
 			hw->cc_buf_size = AUX_BUF_ALIGN(CCBUF_SIZE);
-			hw->ccbuf_phyAddress_virt = dma_alloc_coherent(amports_get_dma_device(),
+			hw->ccbuf_phyAddress_virt = decoder_dma_alloc_coherent(&hw->cc_buf_handle,
 						  hw->cc_buf_size, &hw->ccbuf_phyAddress,
-						  GFP_KERNEL);
+						  "MPEG12_AUX_BUF");
 			if (hw->ccbuf_phyAddress_virt == NULL) {
 				pr_err("%s: failed to alloc cc buffer\n", __func__);
 				return -ENOMEM;
@@ -3076,6 +3138,11 @@ static void start_process_time_set(struct vdec_mpeg12_hw_s *hw)
 static void timeout_process(struct vdec_mpeg12_hw_s *hw)
 {
 	struct vdec_s *vdec = hw_to_vdec(hw);
+
+	if (hw->process_busy) {
+		pr_info("%s, process_busy\n", __func__);
+		return;
+	}
 
 	if (work_pending(&hw->work) ||
 	    work_busy(&hw->work) ||
@@ -3315,7 +3382,8 @@ static void vmpeg12_local_init(struct vdec_mpeg12_hw_s *hw)
 			4 + PAGE_SHIFT,
 			CODEC_MM_FLAGS_CMA_CLEAR |
 			CODEC_MM_FLAGS_FOR_VDECODER |
-			hw->tvp_flag);
+			hw->tvp_flag,
+			BMMU_ALLOC_FLAGS_WAITCLEAR);
 	hw->eos = 0;
 	hw->frame_width = hw->frame_height = 0;
 	hw->frame_dur = hw->frame_prog = 0;
@@ -3338,6 +3406,7 @@ static void vmpeg12_local_init(struct vdec_mpeg12_hw_s *hw)
 	hw->start_process_time = 0;
 	hw->init_flag = 0;
 	hw->dec_again_cnt = 0;
+	hw->process_busy = false;
 
 	init_waitqueue_head(&hw->wait_q);
 	if (dec_control)
@@ -3602,8 +3671,8 @@ void (*callback)(struct vdec_s *, void *),
 		u8 *data = NULL;
 		if (hw->chunk)
 			debug_print(DECODE_ID(hw), PRINT_FLAG_RUN_FLOW,
-				"run: chunk offset 0x%x, size %d\n",
-				hw->chunk->offset, hw->chunk->size);
+				"run: chunk offset 0x%x, size %d, pts %d, pts64 %lld\n",
+				hw->chunk->offset, hw->chunk->size, hw->chunk->pts, hw->chunk->pts64);
 
 		if (!hw->chunk->block->is_mapped)
 			data = codec_mm_vmap(hw->chunk->block->start +
@@ -3735,6 +3804,7 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
 	struct vdec_s *pdata = *(struct vdec_s **)pdev->dev.platform_data;
 	struct vdec_mpeg12_hw_s *hw = NULL;
 	int config_val = 0;
+	static struct vframe_operations_s vf_tmp_ops;
 
 	pr_info("ammvdec_mpeg12 probe start.\n");
 
@@ -3788,8 +3858,13 @@ static int ammvdec_mpeg12_probe(struct platform_device *pdev)
 		for (i = 0; i < DECODE_BUFFER_NUM_MAX; i++)
 			hw->canvas_spec[i] = 0xffffff;
 	}
+
+	memcpy(&vf_tmp_ops, &vf_provider_ops, sizeof(struct vframe_operations_s));
+	if (without_display_mode == 1) {
+		vf_tmp_ops.get = NULL;
+	}
 	vf_provider_init(&pdata->vframe_provider, pdata->vf_provider_name,
-		&vf_provider_ops, pdata);
+		&vf_tmp_ops, pdata);
 
 	if (pdata->parallel_dec == 1) {
 		int i;
@@ -3943,7 +4018,7 @@ static int ammvdec_mpeg12_remove(struct platform_device *pdev)
 	}
 
 	if (hw->ccbuf_phyAddress_virt) {
-		dma_free_coherent(amports_get_dma_device(),hw->cc_buf_size,
+		decoder_dma_free_coherent(hw->cc_buf_handle, hw->cc_buf_size,
 			hw->ccbuf_phyAddress_virt, hw->ccbuf_phyAddress);
 		hw->ccbuf_phyAddress_virt = NULL;
 		hw->ccbuf_phyAddress = 0;

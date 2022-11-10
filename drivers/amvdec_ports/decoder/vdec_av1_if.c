@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
@@ -1209,7 +1209,6 @@ static int vdec_pic_scale(struct vdec_av1_inst *inst, int length, int dw_mode)
 
 	switch (vdec_get_dw_mode(inst, dw_mode)) {
 	case 0x0: /* only afbc, output afbc */
-	case 0x21: /* only afbc, output afbc */
 		ret = 64;
 		break;
 	case 0x1: /* afbc and (w x h), output YUV420 */
@@ -1217,6 +1216,7 @@ static int vdec_pic_scale(struct vdec_av1_inst *inst, int length, int dw_mode)
 		break;
 	case 0x2: /* afbc and (w/4 x h/4), output YUV420 */
 	case 0x3: /* afbc and (w/4 x h/4), output afbc and YUV420 */
+	case 0x21: /* only afbc, But di will output YUV420 (w/4 x h/4) */
 		ret = length >> 2;
 		break;
 	case 0x4: /* afbc and (w/2 x h/2), output YUV420 */

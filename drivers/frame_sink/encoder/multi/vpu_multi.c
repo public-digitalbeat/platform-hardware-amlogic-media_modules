@@ -1,20 +1,22 @@
 /*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
- * Copyright (C) 2019 by Amlogic, Inc.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- * Permission to use, copy, modify, and/or distribute this software for
- * any purpose with or without fee is hereby granted.
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
  *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
+ * Description:
  */
-
 #define LOG_LINE() pr_err("[%s:%d]\n", __FUNCTION__, __LINE__);
 #include <linux/kernel.h>
 #include <linux/err.h>
@@ -25,6 +27,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/wait.h>
 #include <linux/list.h>
+#include <linux/compat.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
@@ -1035,6 +1038,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 	}*/
 	filp->private_data = (void *)(&s_vpu_drv_context);
 	spin_unlock(&s_vpu_lock);
+	#if 0
 	if (first_open && !use_reserve) {
 #ifdef CONFIG_CMA
 		s_video_memory.size = cma_cfg_size;
@@ -1070,7 +1074,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 		enc_pr(LOG_ERROR, "MultiEnc memory is not malloced yet wait & retry!\n");
 		r = -EBUSY;
 	}
-
+	#endif
 	if (first_open) {
 		if ((s_vpu_irq >= 0) && (s_vpu_irq_requested == false)) {
 			s32 err;
@@ -1707,6 +1711,14 @@ INTERRUPT_REMAIN_IN_QUEUE:
 				kfree(vil);
 				break;
 			}
+			if (inst_info.inst_idx >= MAX_NUM_INSTANCE)
+			{
+				enc_pr(LOG_ALL,
+					"error, inst_info.inst_idx is invalid !\n");
+				kfree(vil);
+				up(&s_vpu_sem);
+				return -EFAULT;
+			}
 			vil->inst_idx = inst_info.inst_idx;
 			vil->core_idx = inst_info.core_idx;
 			vil->filp = filp;
@@ -1718,14 +1730,6 @@ INTERRUPT_REMAIN_IN_QUEUE:
 				&s_inst_list_head, list) {
 				if (vil->core_idx == inst_info.core_idx)
 					inst_info.inst_open_count++;
-			}
-			if (inst_info.inst_idx >= MAX_NUM_INSTANCE)
-			{
-				enc_pr(LOG_ALL,
-					"error, inst_info.inst_idx is invalid !\n");
-				kfree(vil);
-				spin_unlock(&s_vpu_lock);
-				return -EFAULT;
 			}
 			kfifo_reset(
 				&s_interrupt_pending_q[inst_info.inst_idx]);
@@ -2540,7 +2544,7 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
 				vpu_free_dma_buffer(&s_common_memory);
 				s_common_memory.phys_addr = 0;
 			}
-
+			#if 0
 			if (s_video_memory.phys_addr && !use_reserve) {
 				enc_pr(LOG_DEBUG,
 					"vpu_release, s_video_memory 0x%lx\n",
@@ -2554,6 +2558,7 @@ static s32 vpu_release(struct inode *inode, struct file *filp)
 				memset(&s_vmem,
 					0, sizeof(struct video_mm_t));
 			}
+			#endif
 			if ((s_vpu_irq >= 0)
 				&& (s_vpu_irq_requested == true)) {
 				free_irq(s_vpu_irq, &s_vpu_drv_context);
@@ -3151,6 +3156,44 @@ static s32 vpu_probe(struct platform_device *pdev)
 			(ulong)s_video_memory.phys_addr, (ulong)s_video_memory.base);
 	} else {
 		enc_pr(LOG_DEBUG, "success to probe vpu device with video memory \n");
+	}
+	if (!use_reserve) {
+#ifdef CONFIG_CMA
+		s_video_memory.size = cma_cfg_size;
+		s_video_memory.phys_addr = (ulong)codec_mm_alloc_for_dma(VPU_DEV_NAME, cma_cfg_size >> PAGE_SHIFT, 0, 0);
+
+		if (s_video_memory.phys_addr) {
+			enc_pr(LOG_DEBUG, "allocating phys 0x%lx, ", s_video_memory.phys_addr);
+			enc_pr(LOG_DEBUG, "virt addr 0x%lx, size %dk\n", s_video_memory.base, s_video_memory.size >> 10);
+
+			if (vmem_init(&s_vmem, s_video_memory.phys_addr, s_video_memory.size) < 0) {
+				enc_pr(LOG_ERROR, "fail to init vmem system\n");
+				err = -ENOMEM;
+
+				codec_mm_free_for_dma(VPU_DEV_NAME, (u32)s_video_memory.phys_addr);
+				vmem_exit(&s_vmem);
+				memset(&s_video_memory, 0, sizeof(struct vpudrv_buffer_t));
+				memset(&s_vmem, 0, sizeof(struct video_mm_t));
+				goto ERROR_PROVE_DEVICE;
+			}
+		} else {
+			enc_pr(LOG_ERROR, "Failed to alloc dma buffer %s, phys:0x%lx\n", VPU_DEV_NAME, s_video_memory.phys_addr);
+
+			if (s_video_memory.phys_addr)
+				codec_mm_free_for_dma(VPU_DEV_NAME, (u32)s_video_memory.phys_addr);
+
+			s_video_memory.phys_addr = 0;
+			err = -ENOMEM;
+			goto ERROR_PROVE_DEVICE;
+		}
+#else
+		enc_pr(LOG_ERROR, "No CMA and reserved memory for MultiEnc!!!\n");
+		err = -ENOMEM;
+#endif
+	} else if (!s_video_memory.phys_addr) {
+		enc_pr(LOG_ERROR, "MultiEnc memory is not malloced yet wait & retry!\n");
+		err = -EBUSY;
+		goto ERROR_PROVE_DEVICE;
 	}
 
 	enc_pr(LOG_DEBUG, "to be allocate from CMA pool_size 0x%lx\n", cma_pool_size);

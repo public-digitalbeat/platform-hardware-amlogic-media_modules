@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/rmparser.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -71,12 +73,6 @@ s32 rmparser_init(struct vdec_s *vdec)
 
 /* for recorded file and local play, this can't change the input source*/
 	/* TS data path */
-/*
-#ifndef CONFIG_AM_DVB
-	WRITE_DEMUX_REG(FEC_INPUT_CONTROL, 0);
-#else
-	tsdemux_set_reset_flag();
-#endif */
 
 	CLEAR_DEMUX_REG_MASK(TS_HIU_CTL, 1 << USE_HI_BSF_INTERFACE);
 	CLEAR_DEMUX_REG_MASK(TS_HIU_CTL_2, 1 << USE_HI_BSF_INTERFACE);

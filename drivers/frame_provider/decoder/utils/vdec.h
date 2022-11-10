@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/frame_provider/decoder/utils/vdec.h
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #ifndef VDEC_H
 #define VDEC_H
 #include <linux/amlogic/media/utils/amports_config.h>
@@ -135,6 +137,23 @@ enum e_trace_work_status {
 
 #define UVM_META_DATA_VF_BASE_INFOS (1 << 0)
 #define UVM_META_DATA_HDR10P_DATA (1 << 1)
+
+//WARNING(0-15)
+#define	DECODER_WARNING_DECODER_TIMEOUT		1 << 0
+#define	DECODER_WARNING_DATA_ERROR		1 << 1
+
+//ERROR(16-23)
+#define	DECODER_ERROR_ALLOC_BUFFER_FAIL		1 << 16
+#define	DECODER_ERROR_PARAM_ERROR		1 << 17
+
+//EMERGENCY(24-31)
+#define	DECODER_EMERGENCY_NO_MEM		1 << 24
+#define	DECODER_EMERGENCY_UNSUPPORT		1 << 25
+#define	DECODER_EMERGENCY_FW_LOAD_ERROR		1 << 26
+
+#define	IS_WARNING_TYPE(error_type)		((error_type) & 0xffff)
+#define	IS_ERROR_TYPE(error_type)		(((error_type) >> 16) & 0xff)
+#define	IS_EMERGENCY_TYPE(error_type)		(((error_type) >> 24) & 0xff)
 
 #define CORE_MASK_VDEC_1 (1 << VDEC_1)
 #define CORE_MASK_HCODEC (1 << VDEC_HCODEC)
@@ -261,6 +280,27 @@ enum vformat_t;
 #define SCALELUT_DATA_WRITE_NUM   1024
 #define RDMA_SIZE                 (1024 * 4 * 4)
 
+#define VDEC_DATA_MAX_INSTANCE_NUM (MAX_INSTANCE_MUN * 2)
+#define VDEC_DATA_NUM 64
+
+struct vdec_data_s {
+	void *private_data;
+	atomic_t  use_count;
+	char *user_data_buf;
+};
+
+struct vdec_data_info_s {
+	atomic_t  buffer_count;
+	atomic_t use_flag;
+	struct codec_mm_cb_s release_callback[VDEC_DATA_NUM];
+	struct vdec_data_s data[VDEC_DATA_NUM];
+};
+
+struct vdec_data_core_s {
+	struct vdec_data_info_s vdata[VDEC_DATA_MAX_INSTANCE_NUM];
+	spinlock_t vdec_data_lock;
+};
+
 struct vdec_s {
 	u32 magic;
 	struct list_head list;
@@ -384,9 +424,11 @@ struct vdec_s {
 	int is_v4l;
 	bool is_stream_mode_dv_multi;
 	int pts_server_id;
+	u32 afd_video_id;
 	pfun_ptsserver_peek_pts_offset ptsserver_peek_pts_offset;
-	u32 play_num;
+	u32 inst_cnt;
 	wait_queue_head_t idle_wait;
+	struct vdec_data_info_s *vdata;
 };
 
 #define CODEC_MODE(a, b, c, d)\
@@ -533,6 +575,9 @@ extern void vdec_vframe_dirty(struct vdec_s *vdec,
 
 /* prepare decoder input */
 extern int vdec_prepare_input(struct vdec_s *vdec, struct vframe_chunk_s **p);
+
+extern u32 vdec_offset_prepare_input(struct vdec_s *vdec, u32 consume_byte,
+	u32 data_offset, u32 data_size);
 
 /* clean decoder input */
 extern void vdec_clean_input(struct vdec_s *vdec);
@@ -704,5 +749,12 @@ void vdec_frame_rate_uevent(int dur);
 
 void vdec_sync_irq(enum vdec_irq_num num);
 
+void vdec_data_buffer_count_increase(ulong data, int index, int cb_index);
+
+struct vdec_data_info_s *vdec_data_get(void);
+
+int vdec_data_get_index(ulong data);
+
+void vdec_data_release(struct codec_mm_s *mm, struct codec_mm_cb_s *cb);
 
 #endif				/* VDEC_H */

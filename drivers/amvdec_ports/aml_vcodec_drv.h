@@ -1,22 +1,22 @@
 /*
-* Copyright (C) 2017 Amlogic, Inc. All rights reserved.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-* This program is distributed in the hope that it will be useful, but WITHOUT
-* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-* FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-* more details.
-*
-* You should have received a copy of the GNU General Public License along
-* with this program; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-*
-* Description:
-*/
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #ifndef _AML_VCODEC_DRV_H_
 #define _AML_VCODEC_DRV_H_
 
@@ -62,6 +62,7 @@
 /* exception handing */
 #define V4L2_EVENT_REQUEST_RESET	(1 << 8)
 #define V4L2_EVENT_REQUEST_EXIT		(1 << 9)
+#define V4L2_EVENT_SEND_ERROR		(1 << 10)
 
 /* eos event */
 #define V4L2_EVENT_SEND_EOS		(1 << 16)
@@ -300,6 +301,7 @@ struct aml_vdec_cfg_infos {
 	 * bit 13	: report downscale yuv buffer size flag.
 	 * bit 12	: for second field pts mode.
 	 * bit 11	: disable error policy.
+	 * bit 10	: dynamic bypass vpp.
 	 * bit 9	: disable ge2d wrapper.
 	 * bit 1	: Non-standard dv flag.
 	 * bit 0	: dv two layer flag.
@@ -413,6 +415,8 @@ struct aml_vdec_thread {
  * @frame_buffer_size: SG buffer page number from
  * @priv_data use for video composer
  *  struct vdec_comp_buf_info
+ * @used: bit[0]: 0, idle; 1, decoder alloc from mmu_box
+ *        bit[1]: 0, idle; 1, decoder alloc from mmu_box_dw.
  */
 struct internal_comp_buf {
 	u32		index;
@@ -428,6 +432,7 @@ struct internal_comp_buf {
 	ulong	header_dw_addr;
 	void	*mmu_box_dw;
 	void	*bmmu_box_dw;
+	u32     used;
 };
 
 /*
@@ -561,6 +566,7 @@ struct aml_vpp_cfg_infos {
 	bool	enable_local_buf;
 	bool	res_chg;
 	bool	is_vpp_reset;
+	bool	dynamic_bypass_vpp;
 };
 
 struct aml_ge2d_cfg_infos {
@@ -568,6 +574,25 @@ struct aml_ge2d_cfg_infos {
 	u32	buf_size;
 	bool	is_drm;
 	bool	bypass;
+};
+
+struct canvas_res {
+	int			cid;
+	u8			name[32];
+};
+
+struct canvas_cache {
+	int			ref;
+	struct canvas_res	res[8];
+	struct mutex		lock;
+};
+
+struct aml_decoder_status_info {
+	u32 error_type;
+	u32 frame_width;
+	u32 frame_height;
+	u32 decoder_count;
+	u32 decoder_error_count;
 };
 
 /*
@@ -735,6 +760,7 @@ struct aml_vcodec_ctx {
 	bool			film_grain_present;
 	void			*bmmu_box_dw;
 	void			*mmu_box_dw;
+	struct aml_decoder_status_info	decoder_status_info;
 };
 
 /**
@@ -754,6 +780,7 @@ struct aml_vcodec_ctx {
  * @queue		: waitqueue for waiting for completion of device commands.
  * @vpp_count		: count the number of open vpp.
  * @v4ldec_class	: creat class sysfs uesd to show some information.
+ * @canche		: canvas pool specific used for v4ldec context.
  */
 struct aml_vcodec_dev {
 	struct v4l2_device		v4l2_dev;
@@ -772,6 +799,7 @@ struct aml_vcodec_dev {
 	wait_queue_head_t		queue;
 	atomic_t			vpp_count;
 	struct class			v4ldec_class;
+	struct canvas_cache		canche;
 };
 
 static inline struct aml_vcodec_ctx *fh_to_ctx(struct v4l2_fh *fh)

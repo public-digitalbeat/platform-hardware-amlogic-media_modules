@@ -1,9 +1,5 @@
 /*
- * vpu.h
- *
- * linux device driver for VPU.
- *
- * Copyright (C) 2006 - 2013  CHIPS&MEDIA INC.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,8 +11,13 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ * linux device driver for VPU.
  */
-
 #ifndef __VPU_DRV_H__
 #define __VPU_DRV_H__
 
@@ -167,7 +168,7 @@ struct vpudrv_buffer_pool_t {
 };
 
 /* To track the instance index and buffer in instance pool */
-struct vpudrv_instanace_list_t {
+struct vpudrv_instance_list_t {
 	struct list_head list;
 	ulong inst_idx;
 	ulong core_idx;

@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/encoder.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
-*/
-
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
+ */
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -30,6 +32,7 @@
 #include <linux/spinlock.h>
 #include <linux/ctype.h>
 #include <linux/fs.h>
+#include <linux/compat.h>
 //#include <asm/segment.h>
 #include <asm/uaccess.h>
 #include <linux/buffer_head.h>
@@ -113,7 +116,7 @@ static struct encode_manager_s encode_manager;
 
 static u32 ie_me_mb_type;
 static u32 ie_me_mode;
-static u32 ie_pippeline_block = 3;
+static u32 ie_pipeline_block = 3;
 static u32 ie_cur_ref_sel;
 /* static u32 avc_endian = 6; */
 static u32 clock_level = 5;
@@ -1036,11 +1039,11 @@ static void avc_buffspec_init(struct encode_wq_s *wq)
 static void avc_init_ie_me_parameter(struct encode_wq_s *wq, u32 quant)
 {
 	ie_cur_ref_sel = 0;
-	ie_pippeline_block = 12;
+	ie_pipeline_block = 12;
 	/* currently disable half and sub pixel */
 	ie_me_mode =
-		(ie_pippeline_block & IE_PIPPELINE_BLOCK_MASK) <<
-	      IE_PIPPELINE_BLOCK_SHIFT;
+		(ie_pipeline_block & IE_PIPELINE_BLOCK_MASK) <<
+	      IE_PIPELINE_BLOCK_SHIFT;
 
 	WRITE_HREG(IE_ME_MODE, ie_me_mode);
 	WRITE_HREG(IE_REF_SEL, ie_cur_ref_sel);
@@ -1535,6 +1538,7 @@ static s32 set_input_format(struct encode_wq_s *wq,
 	u32 input_u = 0;
 	u32 input_v = 0;
 	u8 ifmt_extra = 0;
+	u32 pitch = 0;
 
 	if ((request->fmt == FMT_RGB565) || (request->fmt >= MAX_FRAME_FMT))
 		return -1;
@@ -1543,7 +1547,12 @@ static s32 set_input_format(struct encode_wq_s *wq,
 		dump_raw_input(wq, request);
 
 	picsize_x = ((wq->pic.encoder_width + 15) >> 4) << 4;
-	picsize_y = ((wq->pic.encoder_height + 15) >> 4) << 4;
+	if (request->scale_enable) {
+		picsize_y = ((wq->pic.encoder_height + 15) >> 4) << 4;
+	}
+	else {
+		picsize_y = wq->pic.encoder_height;
+	}
 	oformat = 0;
 
 	if ((request->type == LOCAL_BUFF)
@@ -1557,6 +1566,7 @@ static s32 set_input_format(struct encode_wq_s *wq,
 			input = wq->mem.dct_buff_start_addr;
 			src_addr =
 				wq->mem.dct_buff_start_addr;
+			picsize_y = ((wq->pic.encoder_height + 15) >> 4) << 4;
 		} else if (request->type == DMA_BUFF) {
 			if (request->plane_num == 3) {
 				input_y = (unsigned long)request->dma_cfg[0].paddr;
@@ -1570,7 +1580,8 @@ static s32 set_input_format(struct encode_wq_s *wq,
 				input_y = (unsigned long)request->dma_cfg[0].paddr;
 				if (request->fmt == FMT_NV21
 					|| request->fmt == FMT_NV12) {
-					input_u = input_y + picsize_x * picsize_y;
+					pitch = ((wq->pic.encoder_width + 31) >> 5) << 5;
+					input_u = input_y + pitch * picsize_y;
 					input_v = input_u;
 				}
 				if (request->fmt == FMT_YUV420) {
@@ -1579,7 +1590,7 @@ static s32 set_input_format(struct encode_wq_s *wq,
 				}
 			}
 			src_addr = input_y;
-			picsize_y = wq->pic.encoder_height;
+			//picsize_y = wq->pic.encoder_height;
 			enc_pr(LOG_INFO, "dma addr[0x%lx 0x%lx 0x%lx 0x%lx 0x%lx 0x%lx]\n",
 				(unsigned long)request->dma_cfg[0].vaddr,
 				(unsigned long)request->dma_cfg[0].paddr,
@@ -3295,7 +3306,8 @@ static s32 convert_request(struct encode_wq_s *wq, u32 *cmd_info)
 				wq->request.plane_num);
 			if (wq->request.fmt == FMT_NV12 ||
 				wq->request.fmt == FMT_NV21 ||
-				wq->request.fmt == FMT_YUV420) {
+				wq->request.fmt == FMT_YUV420 ||
+				wq->request.fmt == FMT_RGBA8888) {
 				if (wq->request.plane_num > 3) {
 					enc_pr(LOG_ERROR, "wq->request.plane_num is invalid %d.\n",
 							wq->request.plane_num);
@@ -4880,7 +4892,7 @@ static s32 amvenc_avc_probe(struct platform_device *pdev)
 	if (encode_manager.use_reserve == false) {
 #ifndef CONFIG_CMA
 		enc_pr(LOG_ERROR,
-			"amvenc_avc memory is invaild, probe fail!\n");
+			"amvenc_avc memory is invalid, probe fail!\n");
 		return -EFAULT;
 #else
 		encode_manager.cma_pool_size =

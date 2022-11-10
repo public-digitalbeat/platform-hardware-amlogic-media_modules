@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/vmjpeg.c
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -107,7 +109,7 @@ static u32 without_display_mode;
 static u32 dynamic_buf_num_margin;
 static u32 run_ready_min_buf_num = 2;
 #undef pr_info
-#define pr_info printk
+#define pr_info pr_cont
 unsigned int mmjpeg_debug_mask = 0xff;
 #define PRINT_FLAG_ERROR              0x0
 #define PRINT_FLAG_RUN_FLOW           0X0001
@@ -250,6 +252,22 @@ struct vdec_mjpeg_hw_s {
 
 static void reset_process_time(struct vdec_mjpeg_hw_s *hw);
 
+static u32 mjpeg_get_endian(struct vdec_mjpeg_hw_s *hw)
+{
+	u32 endian;
+
+	/* mjpeg convert endian to match display. */
+	if ((is_cpu_t7()) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5W)) {
+		endian = (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) ? 7 : 0;
+	} else {
+		endian = (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) ? 0 : 7;
+	}
+
+	return endian;
+}
+
 static void set_frame_info(struct vdec_mjpeg_hw_s *hw, struct vframe_s *vf)
 {
 	u32 width, height;
@@ -282,15 +300,7 @@ static void set_frame_info(struct vdec_mjpeg_hw_s *hw, struct vframe_s *vf)
 	vf->canvas1_config[1] = hw->buffer_spec[vf->index].canvas_config[1];
 	vf->canvas1_config[2] = hw->buffer_spec[vf->index].canvas_config[2];
 
-	/* mjpeg convert endian to match display. */
-	if ((get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) ||
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) ||
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5W)) {
-		temp_endian = (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) ? 7 : 0;
-	} else {
-		temp_endian = (hw->canvas_mode == CANVAS_BLKMODE_LINEAR) ? 0 : 7;
-	}
-
+	temp_endian = mjpeg_get_endian(hw);
 	vf->canvas0_config[0].endian = temp_endian;
 	vf->canvas0_config[1].endian = temp_endian;
 	vf->canvas0_config[2].endian = temp_endian;
@@ -401,6 +411,8 @@ static irqreturn_t vmjpeg_isr_thread_fn(struct vdec_s *vdec, int irq)
 				vmjpeg_get_ps_info(hw, frame_width, frame_height, &ps);
 				hw->v4l_params_parsed = true;
 				vdec_v4l_set_ps_infos(ctx, &ps);
+				ctx->decoder_status_info.frame_height = ps.visible_height;
+				ctx->decoder_status_info.frame_width = ps.visible_width;
 				reset_process_time(hw);
 				hw->dec_result = DEC_RESULT_AGAIN;
 				vdec_schedule_work(&hw->work);
@@ -489,6 +501,7 @@ static irqreturn_t vmjpeg_isr_thread_fn(struct vdec_s *vdec, int irq)
 	ATRACE_COUNTER(hw->new_q_name, kfifo_len(&hw->newframe_q));
 	ATRACE_COUNTER(hw->disp_q_name, kfifo_len(&hw->display_q));
 	hw->frame_num++;
+	v4l2_ctx->decoder_status_info.decoder_count++;
 	mmjpeg_debug_print(DECODE_ID(hw), PRINT_FRAME_NUM,
 		"%s:frame num:%d,pts=%d,pts64=%lld. dur=%d\n",
 		__func__, hw->frame_num,
@@ -642,7 +655,7 @@ static int vmjpeg_dec_status(struct vdec_s *vdec, struct vdec_info *vstatus)
 	return 0;
 }
 
-static void init_scaler(void)
+static void init_scaler(u32 endian)
 {
 	/* 4 point triangle */
 	const unsigned int filt_coef[] = {
@@ -714,6 +727,13 @@ static void init_scaler(void)
 	/* reset pscaler */
 	WRITE_VREG(DOS_SW_RESET0, (1 << 10));
 	WRITE_VREG(DOS_SW_RESET0, 0);
+
+	if (is_cpu_t7c()) {
+		if (endian == 7)
+			WRITE_VREG(PSCALE_CTRL2, (0x1ff << 16) | READ_VREG(PSCALE_CTRL2));
+		else
+			WRITE_VREG(PSCALE_CTRL2, (0 << 16) | READ_VREG(PSCALE_CTRL2));
+	}
 
 	if (get_cpu_major_id() < AM_MESON_CPU_MAJOR_ID_SC2) {
 		READ_RESET_REG(RESET2_REGISTER);
@@ -825,10 +845,12 @@ static void start_process_time(struct vdec_mjpeg_hw_s *hw)
 
 static void timeout_process(struct vdec_mjpeg_hw_s *hw)
 {
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
 	amvdec_stop();
 	mmjpeg_debug_print(DECODE_ID(hw), PRINT_FLAG_ERROR,
 		"%s decoder timeout\n", __func__);
 	hw->dec_result = DEC_RESULT_DONE;
+	vdec_v4l_post_error_event(ctx, DECODER_WARNING_DECODER_TIMEOUT);
 	reset_process_time(hw);
 	vdec_schedule_work(&hw->work);
 }
@@ -1069,6 +1091,7 @@ static int vmjpeg_hw_ctx_restore(struct vdec_mjpeg_hw_s *hw)
 	int index = -1;
 	struct aml_vcodec_ctx * v4l2_ctx = hw->v4l2_ctx;
 	int i = 0;
+	u32 endian;
 
 	if (hw->v4l_params_parsed) {
 		struct vdec_pic_info pic;
@@ -1105,7 +1128,9 @@ static int vmjpeg_hw_ctx_restore(struct vdec_mjpeg_hw_s *hw)
 
 	WRITE_VREG(DOS_SW_RESET0, (1 << 7) | (1 << 6));
 	WRITE_VREG(DOS_SW_RESET0, 0);
-	init_scaler();
+
+	endian = mjpeg_get_endian(hw);
+	init_scaler(endian);
 
 	/* clear buffer IN/OUT registers */
 	WRITE_VREG(MREG_TO_AMRISC, 0);
@@ -1188,7 +1213,8 @@ static s32 vmjpeg_init(struct vdec_s *vdec)
 		MAX_BMMU_BUFFER_NUM,
 		4 + PAGE_SHIFT,
 		CODEC_MM_FLAGS_CMA_CLEAR |
-		CODEC_MM_FLAGS_FOR_VDECODER);
+		CODEC_MM_FLAGS_FOR_VDECODER,
+		BMMU_ALLOC_FLAGS_WAIT);
 
 	timer_setup(&hw->check_timer, check_timer_func, 0);
 	hw->check_timer.expires = jiffies + CHECK_INTERVAL;
@@ -1278,6 +1304,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 	struct vdec_mjpeg_hw_s *hw =
 		(struct vdec_mjpeg_hw_s *)vdec->private;
 	int ret;
+	struct aml_vcodec_ctx *ctx = hw->v4l2_ctx;
 
 	hw->vdec_cb_arg = arg;
 	hw->vdec_cb = callback;
@@ -1314,6 +1341,7 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 		if (ret < 0) {
 			pr_err("[%d] MMJPEG: the %s fw loading failed, err: %x\n",
 				vdec->id, tee_enabled() ? "TEE" : "local", ret);
+			vdec_v4l_post_error_event(ctx, DECODER_EMERGENCY_FW_LOAD_ERROR);
 			hw->dec_result = DEC_RESULT_FORCE_EXIT;
 			vdec_schedule_work(&hw->work);
 			return;
@@ -1334,8 +1362,8 @@ static void run(struct vdec_s *vdec, unsigned long mask,
 	start_process_time(hw);
 	hw->last_vld_level = 0;
 	mod_timer(&hw->check_timer, jiffies + CHECK_INTERVAL);
-	amvdec_start();
 	vdec_enable_input(vdec);
+	amvdec_start();
 	hw->stat |= STAT_VDEC_RUN;
 	hw->init_flag = 1;
 

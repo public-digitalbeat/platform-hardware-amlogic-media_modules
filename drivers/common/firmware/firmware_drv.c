@@ -1,7 +1,5 @@
-/*
- * drivers/amlogic/media/common/firmware/firmware.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ /*
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -41,7 +44,7 @@
 #include "../chips/decoder_cpu_ver_info.h"
 
 /* major.minor */
-#define PACK_VERS "v0.3"
+#define PACK_VERS "v0.4"
 
 #define CLASS_NAME	"firmware_codec"
 #define DEV_NAME	"firmware_vdec"
@@ -59,6 +62,7 @@
 
 #define PACK ('P' << 24 | 'A' << 16 | 'C' << 8 | 'K')
 #define CODE ('C' << 24 | 'O' << 16 | 'D' << 8 | 'E')
+#define NEWP ('N' << 24 | 'E' << 16 | 'W' << 8 | 'P')
 
 #ifndef FIRMWARE_MAJOR
 #define FIRMWARE_MAJOR AMSTREAM_MAJOR
@@ -80,6 +84,7 @@ struct package_head_s package_head;
 
 static u32 debug;
 static u32 detail;
+static bool new_package = false;
 
 int get_firmware_data(unsigned int format, char *buf)
 {
@@ -192,7 +197,7 @@ static int request_firmware_from_sys(const char *file_name,
 	}
 
 	magic = fw_probe((char *)fw->data);
-	if (magic != PACK && magic != CODE) {
+	if (magic != PACK && magic != CODE && magic != NEWP) {
 		if (fw->size < SEC_OFFSET) {
 			pr_info("This is an invalid firmware file.\n");
 			goto release;
@@ -247,6 +252,22 @@ int get_decoder_firmware_data(enum vformat_e format,
 	return ret;
 }
 EXPORT_SYMBOL(get_decoder_firmware_data);
+
+int get_decoder_firmware_version(void)
+{
+	int version;
+
+	version = (package_head.version & 0xff);
+
+	return version;
+}
+EXPORT_SYMBOL(get_decoder_firmware_version);
+
+int get_decoder_firmware_submit_count(void)
+{
+	return package_head.submit_count;
+}
+EXPORT_SYMBOL(get_decoder_firmware_submit_count);
 
 static unsigned long fw_mgr_lock(struct fw_mgr_s *mgr)
 {
@@ -678,7 +699,7 @@ static int fw_package_parse(struct fw_files_s *files,
 		pack_data += (pack_info->head.length + info_len);
 		pack_info = (struct package_info_s *)pack_data;
 
-		if (!data->head.duplicate &&
+		if (!data->head.duplicate && (new_package == false) &&
 			!fw_data_check_sum(data)) {
 			pr_info("check sum fail !\n");
 			kfree(data);
@@ -778,6 +799,10 @@ static int fw_data_binding(void)
 		magic = fw_probe(buf);
 
 		if (files->file_type == VIDEO_PACKAGE && magic == PACK) {
+			if (!fw_check_pack_version(buf))
+				ret = fw_package_parse(files, buf, size);
+		} else if (files->file_type == VIDEO_PACKAGE && magic == NEWP) {
+			new_package = true;
 			if (!fw_check_pack_version(buf))
 				ret = fw_package_parse(files, buf, size);
 		} else if (files->file_type == VIDEO_FW_FILE && magic == CODE) {

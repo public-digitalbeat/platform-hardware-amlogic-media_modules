@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/media/stream_input/parser/psparser.c
- *
- * Copyright (C) 2016 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,8 +11,12 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/errno.h>
@@ -28,7 +30,6 @@
 #include <linux/amlogic/media/utils/amstream.h>
 
 #include <linux/uaccess.h>
-/* #include <mach/am_regs.h> */
 #include <linux/amlogic/media/utils/vdec_reg.h>
 #include "../amports/streambuf_reg.h"
 #include "../amports/streambuf.h"
@@ -254,12 +255,6 @@ static u32 parser_process(s32 type, s32 packet_len)
 
 				header_len -= 128;
 			}
-#if 0
-			if (misc_flags & 0x40) {
-				/* pack_header_field_flag */
-				/* Invalid case */
-			}
-#endif
 			if (misc_flags & 0x20) {
 				/* program_packet_sequence_counter_flag */
 				PARSER_POP;
@@ -545,19 +540,6 @@ static u32 parser_process(s32 type, s32 packet_len)
 					return SEARCH_START_CODE;
 
 				else {
-#if 0
-					if (pts_dts_flag & 2)
-						ptsmgr_spts_checkin(pts);
-
-					if (ptsmgr_first_spts_ready()) {
-						SET_BLOCK(packet_len);
-						return SEND_SUBPIC_SEARCH;
-
-					} else {
-						SET_DISCARD_SIZE(packet_len);
-						return DISCARD_SEARCH;
-					}
-#else
 					if (pts_dts_flag & 2)
 						sub_got_first_pts = 1;
 
@@ -588,7 +570,6 @@ static u32 parser_process(s32 type, s32 packet_len)
 
 					SET_DISCARD_SIZE(packet_len);
 					return DISCARD_SEARCH;
-#endif
 				}
 			} else {
 				SET_DISCARD_SIZE(packet_len);
@@ -895,18 +876,10 @@ s32 psparser_init(u32 vid, u32 aid, u32 sid, struct vdec_s *vdec)
 
 /* for recorded file and local play, this can't change the input source*/
 	/* TS data path */
-/*
-#ifndef CONFIG_AM_DVB
-	WRITE_DEMUX_REG(FEC_INPUT_CONTROL, 0);
-#else
-	tsdemux_set_reset_flag();
-#endif */
-
 	CLEAR_DEMUX_REG_MASK(TS_HIU_CTL, 1 << USE_HI_BSF_INTERFACE);
 	CLEAR_DEMUX_REG_MASK(TS_HIU_CTL_2, 1 << USE_HI_BSF_INTERFACE);
 	CLEAR_DEMUX_REG_MASK(TS_HIU_CTL_3, 1 << USE_HI_BSF_INTERFACE);
 	CLEAR_DEMUX_REG_MASK(TS_FILE_CONFIG, (1 << TS_HIU_ENABLE));
-
 	/* hook stream buffer with PARSER */
 	WRITE_PARSER_REG(PARSER_VIDEO_START_PTR, vdec->input.start);
 	WRITE_PARSER_REG(PARSER_VIDEO_END_PTR,

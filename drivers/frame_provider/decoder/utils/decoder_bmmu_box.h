@@ -1,7 +1,5 @@
 /*
- * drivers/amlogic/amports/decoder/decoder_bmmu_box.h
- *
- * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
+ * Copyright (C) 2017 Amlogic, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,16 +11,21 @@
  * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *
+ * Description:
  */
-
 #ifndef DECODER_BLOCK_BUFFER_BOX
 #define DECODER_BLOCK_BUFFER_BOX
 
 void *decoder_bmmu_box_alloc_box(const char *name,
-								 int channel_id,
-								 int max_num,
-								 int aligned,
-								 int mem_flags);
+				int channel_id,
+				int max_num,
+				int aligned,
+				int mem_flags,
+				u32 wait_flags);
 
 int decoder_bmmu_box_alloc_idx(
 	void *handle, int idx, int size,
